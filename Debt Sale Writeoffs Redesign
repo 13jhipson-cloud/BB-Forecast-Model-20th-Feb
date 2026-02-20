@@ -1,0 +1,387 @@
+Developer Instructions: Redesign Quarterly Debt Sale Write-offs (WO_DebtSold)
+1) Context and problem statement (why change is needed)
+Current model behaviour (v5.4)
+
+The model forecasts WO_DebtSold as a rate-based flow gated to debt sale months:
+
+WO_DebtSold = OpeningGBV × WO_DebtSold_Rate only in Mar/Jun/Sep/Dec; otherwise 0.
+
+In 7_Rate_Methodology_Rules, WO_DebtSold is currently forecast using SegMedian for each segment (Cohort=ALL, MOB range), which typically produces near-zero rates because:
+
+most cohort×segment×MOB cells are 0 even in “sale-quarter” months,
+
+many cohorts have sparse/zero DS events,
+
+outlier events (Dec-25) can dominate if included.
+
+Observed failure mode
+
+Forecast WO_DebtSold totals in sale-quarter months can materially understate actuals (e.g., forecast ~£2m vs expected ~£7m (portfolio total for all segements) in Dec-25 / normal quarters).
+
+Even if we filter out non-sale months when fitting DS curves, cohort-level DS history remains sparse, so:
+
+“curve fitting” is unstable/noisy,
+
+independent cohort-level forecasts do not guarantee that summed segment totals match expected quarterly behaviour,
+
+Dec-25 one-off can poison fitted curves if included.
+
+Design requirement
+
+We need a hierarchical / structured approach:
+
+Use cohort-level curves primarily to allocate DS across cohorts,
+
+Ensure the segment-level quarterly total is stable and anchored to “normal” quarters,
+
+Exclude Dec-25 from baseline calibration to avoid inflating future DS.
+
+This is not a “single-month patch” because it defines a regime for all sale quarters.
+
+2) Target behaviour (functional requirements)
+Functional requirements
+
+Quarterly gating preserved: DS write-offs occur only in Mar/Jun/Sep/Dec (or configurable list).
+
+Normal quarters match baseline: for Mar/Jun/Sep-type quarters, segment totals should align with historical normal behaviour (calibrated from Mar/Jun/Sep-25; Dec-25 excluded as outlier).
+
+Outlier handling: Dec-25 is treated as one-off and must not inflate the baseline for future quarters.
+
+Cohort-level allocation remains economically plausible:
+
+older/more “distressed-like” cohorts can receive higher DS propensity,
+
+newer cohorts with no DS history still receive an inferred DS curve via donors.
+
+Implementation is robust to sparse data and schedule incompleteness.
+
+Non-functional requirements
+
+Regime-based, not calendar-month “manual override” logic (except optional explicit outlier override for Dec-25 if required).
+
+Clear diagnostics and testability (segment quarter totals, donor mapping stability, scaling factor values).
+
+3) Proposed solution: hierarchical DS forecast
+High-level architecture
+
+Implement two layers for WO_DebtSold in debt-sale months:
+
+Layer A — Cohort-level DS curve generation (shape / allocation)
+
+Build DS “event-month” rates per cohort using donor cohorts chosen by Coverage Ratio (CR) curve similarity.
+
+Generate a DS rate curve for every cohort×segment even when sparse.
+
+Layer B — Segment-level scaling to enforce quarterly totals (volume control)
+
+Compute a per-segment quarterly scaling factor so the sum of cohort outputs matches historical normal-quarter totals.
+
+Calibrate scaling only on “normal” quarters (Mar/Jun/Sep-25), explicitly excluding Dec-25.
+
+Then in forecast:
+
+In debt sale months, compute raw cohort DS write-offs from Layer A, and multiply by Layer B scaling to ensure totals are right.
+
+This keeps forecasting “data-driven” while avoiding the structural under-forecast that happens when sparse cohort curves are summed.
+
+4) Detailed implementation steps
+4.1 Build DS event-month rate history (clean input for donors)
+
+Goal: Ensure DS curve fitting is based only on event months and not polluted by zeros.
+
+Identify DS event months:
+
+Use existing Config.DS_MONTHS (Mar/Jun/Sep/Dec) and is_debt_sale_month().
+
+Create a DS-only historical dataset for curve construction:
+
+Filter actuals rows to include only months where is_debt_sale_month(Month) == True.
+
+Additionally exclude the outlier month Dec-25 from calibration inputs (or winsorise it).
+
+Recommended: exclude Dec-25 from calibration, while still allowing it in backtest comparison.
+
+Compute DS event-month rate:
+
+WO_DebtSold_Rate_Event = WO_DebtSold / OpeningGBV computed only on event months.
+
+Maintain cohort×segment×MOB indexing consistent with the rest of curves.
+
+Important: Do not use zero-filled extended curves for DS curve estimation unless you explicitly fill only post-extension and keep calibration on event months only.
+
+4.2 Compute CR-curve similarity and donor mapping
+
+Goal: Group “similar” cohorts using CR curve shape so we can borrow DS behaviour sensibly.
+
+Choose a MOB window for CR similarity (configurable):
+
+Example: MOB 6–24 or MOB 6–36 (avoid very early MOB noise and very late sparse tail).
+
+For each segment, for each cohort:
+
+Extract a vector v_c of Total_Coverage_Ratio values across the chosen MOB window.
+
+Standardize the vector (e.g., z-score within cohort) to focus on shape rather than level, OR use correlation distance directly.
+
+Define a distance metric:
+
+Recommended: 1 - correlation(v_c, v_d) (robust to scale).
+
+Alternative: cosine distance after standardization.
+
+Define donor eligibility:
+
+Donor cohort must have at least N event-quarter DS observations (excluding Dec-25), e.g. N>=2 or N>=3.
+
+If not enough donors exist in the segment, fall back to:
+
+segment-level pooled donor curve from all eligible cohorts, or
+
+a segment baseline curve.
+
+Select donors:
+
+Nearest neighbour (best single donor), or
+
+top-k donors (e.g. k=3) with inverse-distance weighting.
+
+Persist donor mapping output:
+
+Add a diagnostic table: Segment, Cohort, DonorCohort(s), Distance(s), N_DS_Obs.
+
+4.3 Generate DS curves per cohort (shrinkage + donor blend)
+
+Goal: Produce a stable DS rate curve for every cohort×segment for event months.
+
+For each cohort×segment:
+
+If cohort has sufficient DS event observations:
+
+Build its own DS event-month curve (by MOB or by “sale quarter index”).
+
+Smooth it and shrink toward donor curve to reduce noise:
+
+Example shrinkage:
+
+DS_curve_final = α * DS_curve_own + (1-α) * DS_curve_donor
+
+where α = min(1, N_obs / N_target) (e.g., N_target=6)
+
+If cohort has insufficient observations:
+
+DS_curve_final = DS_curve_donor (or weighted donor mix).
+
+Ensure curve is defined across forecast MOBs:
+
+Extend DS curve forward using a stable tail rule (e.g., last-observed event-rate held flat or decayed).
+
+Cap DS rates:
+
+Apply a maximum DS rate cap (configurable) to prevent unrealistic quarter write-offs.
+
+Example cap: DS_rate <= cap_pct_of_opening_gbv in sale months.
+
+Design choice: DS curve can be defined either:
+
+as a function of MOB directly, OR
+
+as a function of “sale-quarter number since origination”.
+Given the model is MOB-indexed, MOB-based is easiest.
+
+4.4 Segment-level quarterly scaling (normal quarters only; exclude Dec-25)
+
+Goal: Ensure segment totals in sale quarters match normal-quarter history without letting Dec-25 inflate the baseline.
+
+Define normal-quarter calibration set:
+
+Use event-quarter months Mar-25, Jun-25, Sep-25 as the calibration months for the scaling factor.
+
+Exclude Dec-25 explicitly.
+
+For each segment and each calibration event month:
+
+Compute actual segment DS total: Actual_DS_seg_m = sum(WO_DebtSold_actual).
+
+Compute implied segment DS total using the donor-generated curves applied to actual OpeningGBV for that month:
+
+Implied_DS_seg_m = sum(OpeningGBV_actual × DS_rate_final_for_that_cohort×segment×MOB)
+
+Compute scaling ratio per calibration month:
+
+ratio_m = Actual_DS_seg_m / Implied_DS_seg_m
+
+Handle edge cases:
+
+if implied is 0, set ratio to 1 and flag a warning (means DS curves failed).
+
+winsorise ratio if extreme.
+
+Define final scaling factor per segment:
+
+ScaleFactor_seg = median(ratio_m over Mar/Jun/Sep)
+
+Store this scale factor (diagnostics sheet/table).
+
+Apply scaling factor in forecast:
+
+In sale months:
+
+WO_DebtSold_forecast = WO_DebtSold_raw × ScaleFactor_seg
+
+In non-sale months: 0 (unchanged).
+
+This is “regime-based” because it’s a stable factor applying to all sale quarters, derived from normal quarters and excluding the outlier.
+
+4.5 Outlier handling for Dec-25 (recommended policy)
+
+Objective: Do not let Dec-25 contaminate the scaling/curve calibration.
+
+Recommended default:
+
+Exclude Dec-25 from:
+
+donor construction dataset for DS curves,
+
+scaling factor calibration dataset.
+
+Dec-25 remains:
+
+visible in backtest comparisons,
+
+optionally forecastable via schedule override (if schedule contains Dec-25 explicitly).
+
+If you need Dec-25 forecast to match actuals:
+
+Allow debt sale schedule override for that month only (still not contaminating baseline because it’s excluded from calibration).
+
+5) Code integration points in backbook_forecast.py
+Where to implement
+
+Implement as a new DS forecasting module used during rate lookup / forecast step:
+
+During curve-building phase:
+
+After calculate_curves_base() and before rate lookup is finalized:
+
+build a DS calibration dataframe filtered to event months (and excluding Dec-25).
+
+Create functions (suggested):
+
+build_ds_event_history(df_actuals, config) -> df_ds_event
+
+compute_cr_similarity_map(df_curves, config) -> donor_map
+
+build_ds_donor_curves(df_ds_event, donor_map, config) -> df_ds_curve_final
+
+calibrate_ds_scaling(df_actuals_event_months, df_ds_curve_final, config) -> scale_factors
+
+apply_ds_override_or_scaled_rate(...) inside forecast step
+
+In build_rate_lookup() / apply_approach():
+
+For metric WO_DebtSold:
+
+bypass SegMedian methodology path and instead query df_ds_curve_final for cohort×segment×MOB DS rate (event month only).
+
+You can preserve the methodology system by adding a new Approach type such as DSDonorCRScaled for WO_DebtSold.
+
+In run_one_step():
+
+Keep existing gating if is_debt_sale_month(forecast_month).
+
+Compute:
+
+wo_raw = opening_gbv * ds_rate_from_lookup
+
+wo = wo_raw * scale_factor_for_segment
+
+Else: wo = 0
+
+Important: Keep scaling factor separate from “rate cap”; apply cap either before or after scaling but be consistent and test which is preferable. Usually cap after scaling to prevent inflated totals.
+
+6) Workbook / outputs updates (diagnostics required)
+
+Add diagnostics sheets/tables so the approach is auditable:
+
+DS_Donor_Map:
+
+Segment, Cohort, DonorCohort(s), Similarity/Distance, DS_obs_count, CR_window_used.
+
+DS_ScaleFactors:
+
+Segment, CalibrationMonthsUsed, Actual_DS, Implied_DS, Ratios, FinalScaleFactor, OutlierExclusions.
+
+DS_Curve_Comparison (optional):
+
+For a few cohorts per segment: own DS curve vs donor curve vs final curve.
+
+Update 16_Curve_Comparison:
+
+Include WO_DebtSold_Rate final curves for inspection.
+
+7) Validation checks (must pass)
+Backtest checks (historical sanity)
+
+For each segment:
+
+In Mar-25, Jun-25, Sep-25:
+
+forecast/implied DS totals (post-scaling) should match actuals within tolerance (e.g., ±5–10% depending on noise).
+
+Dec-25:
+
+Must not affect scale factor or donor construction.
+
+If schedule override is enabled, Dec-25 forecast should follow schedule; otherwise it will follow normal regime (and that is acceptable if agreed).
+
+Forecast checks (forward-looking plausibility)
+
+Sale-quarter totals should:
+
+decline appropriately with shrinking book (if scaling is constant, totals will naturally shrink if rates are stable and exposures decline; confirm this is desired).
+
+No discontinuities at cutoff:
+
+last actual sale quarter vs first forecast sale quarter should not jump purely due to methodology.
+
+Technical checks
+
+Ensure no segment ends up with Implied_DS=0 in calibration months; if so, donor logic failed or eligibility too strict.
+
+8) Recommended parameter defaults (make configurable)
+
+DS_EVENT_MONTHS = {3,6,9,12}
+
+DS_OUTLIER_MONTHS = {2025-12} (excluded from calibration)
+
+CR_SIM_MOB_START = 6
+
+CR_SIM_MOB_END = 24 (or 36)
+
+MIN_DS_OBS_DONOR = 2 (or 3)
+
+TOP_K_DONORS = 3
+
+DS_SHRINKAGE_TARGET_OBS = 6
+
+DS_RATE_CAP = <set based on historical maxima> (developer to compute from history)
+
+9) Rollout steps
+
+Implement diagnostics first (donor map + scale factors) without changing forecast outputs; verify donor choices and ratios.
+
+Switch WO_DebtSold methodology for one segment (e.g., NON PRIME) to the new approach; regenerate vNext outputs.
+
+Validate sale-quarter totals and check no new issues in GBV bridge / ex-contra backtest.
+
+Expand to all segments.
+
+Summary of what you’re asking the developer to do
+
+Replace the current WO_DebtSold rate forecasting approach (currently SegMedian) with a CR-similarity donor curve system that produces stable DS curves per cohort×segment using event-month data only.
+
+Add a segment-level scaling factor calibrated on normal quarters (Mar/Jun/Sep-25) to ensure the sum across cohorts matches expected quarterly DS behaviour.
+
+Explicitly exclude Dec-25 from calibration so it does not inflate future forecasts.
+
+Add diagnostics and validation to make the approach auditable and robust.
