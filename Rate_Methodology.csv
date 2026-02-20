@@ -1,0 +1,368 @@
+Segment,Cohort,Metric,MOB_Start,MOB_End,Approach,Donor_Cohort,Param1,Param2,Explanation
+NON PRIME,201912,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.768). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,201912,Total_Coverage_Ratio,0,999,CohortAvg,,6.0,,
+NON PRIME,202001,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202101 (overall corr=0.869). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202001,Total_Coverage_Ratio,0,999,CohortAvg,,6.0,,
+NON PRIME,202101,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.869). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202101,Total_Coverage_Ratio,0,999,CohortAvg,,6.0,,
+NON PRIME,202201,Coll_Principal,37,96,StaticCohortAvg,,12.0,,v7.0a: Changed from ShapeBorrowScaled(202101). Post step-down donor shape amplifies too aggressively; StaticCohortAvg (mean~-0.093) better matches backtest actuals of -0.072 to -0.091.
+NON PRIME,202201,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202201,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202301,Coll_Principal,13,27,StaticCohortAvg,,12.0,,v7.0a: Changed from ShapeBorrowScaled(202201). 202201 donor shape at MOB28-31 pulls forecast to -0.030 to -0.044; own last-12 mean (~-0.077) matches backtest actuals of -0.069 to -0.079.
+NON PRIME,202301,Coll_Principal,28,36,StaticCohortAvg,,3.0,,v7.0f: MOBs 28-36 switched to StaticCohortAvg(3) (tail stabilisation).
+NON PRIME,202301,Coll_Principal,37,96,StaticCohortAvg,,3.0,,v7.0f: Tail MOBs 37+ changed to StaticCohortAvg(3) (tail stabilisation).
+NON PRIME,202301,Total_Coverage_Ratio,0,999,ShapeBorrowScaled,,202201.0,ratio:27,Migrated from ScaledDonor: ratio mode preserves proportional CR shape
+NON PRIME,202404,Coll_Principal,13,36,StaticCohortAvg,,12.0,,v7.0a: Changed from ShapeBorrowScaled(202001). Donor anchor inflated by early DonorCohort rates; own last-12 mean (~-0.066) is more conservative and accurate vs backtest actuals of ~-0.065-0.087.
+NON PRIME,202404,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.719). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202404,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202201.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202404,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202404,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202405,Coll_Principal,13,36,StaticCohortAvg,,12.0,,No correlated donor for MOB 13-36. StaticCohortAvg(12) from own 16 actuals.
+NON PRIME,202405,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.867). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202405,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202201.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202405,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202405,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202406,Coll_Principal,13,36,StaticCohortAvg,,12.0,,No correlated donor for MOB 13-36. StaticCohortAvg(12) from own 15 actuals.
+NON PRIME,202406,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.860). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202406,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202201.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202406,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202406,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202407,Coll_Principal,13,36,StaticCohortAvg,,12.0,,No correlated donor for MOB 13-36. StaticCohortAvg(12) from own 14 actuals.
+NON PRIME,202407,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.913). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202407,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202201.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202407,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202407,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202408,Coll_Principal,13,36,StaticCohortAvg,,12.0,,No correlated donor for MOB 13-36. StaticCohortAvg(12) from own 13 actuals.
+NON PRIME,202408,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.822). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202408,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202201.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202408,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202408,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202409,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202409,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.862). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202409,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202201.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202409,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202409,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202410,Coll_Principal,1,12,ShapeBorrowScaled,,202001.0,ratio:11,v7.0c: ratio:11 via 202001 (scale=0.936). Target collecting at 93.6% of donor level at MOB 11; proportional scaling preserves donor shape without level jump.
+NON PRIME,202410,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202410,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.730). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202410,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202301.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202410,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202410,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202411,Coll_Principal,1,12,DonorCohort,,202301.0,,"Early-life: copy shape from 202301 (corr=0.763, RMSE=0.0047)."
+NON PRIME,202411,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202411,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.721). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202411,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202301.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202411,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202411,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202412,Coll_Principal,1,12,StaticCohortAvg,,9.0,,v7.0h: Changed from DonorCohort(202201). StaticCohortAvg(9).
+NON PRIME,202412,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202412,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202101 (overall corr=0.718). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202412,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202301.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202412,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202412,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202501,Coll_Principal,1,12,StaticCohortAvg,,3.0,,v7.0h: Changed from StaticCohortAvg(8). StaticCohortAvg(3).
+NON PRIME,202501,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202501,Coll_Principal,37,96,SegMedian,,,,Tail: no donor with MOB37+ data and positive correlation. SegMedian.
+NON PRIME,202501,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202501,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202502,Coll_Principal,1,12,StaticCohortAvg,,7.0,,
+NON PRIME,202502,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202502,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202101 (overall corr=0.657). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202502,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202301.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202502,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202502,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202503,Coll_Principal,1,12,StaticCohortAvg,,6.0,,
+NON PRIME,202503,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202503,Coll_Principal,37,96,StaticCohortAvg,,12.0,,Tail: ShapeBorrowScaled from 202001 (overall corr=0.510). NOTE: no target cohort at MOB37 yet - unvalidated.
+NON PRIME,202503,Total_Coverage_Ratio,0,31,ShapeBorrowScaled,,202301.0,ratio:15,Migrated from ScaledDonor
+NON PRIME,202503,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202503,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202504,Coll_Principal,1,12,StaticCohortAvg,,3.0,,v7.0h: Changed from StaticCohortAvg(5). StaticCohortAvg(3).
+NON PRIME,202504,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202504,Coll_Principal,37,96,SegMedian,,,,Tail: no donor with MOB37+ data and positive correlation. SegMedian.
+NON PRIME,202504,Total_Coverage_Ratio,0,999,ShapeBorrowScaled,,202503.0,ratio:5,Migrated from ScaledDonor
+NON PRIME,202505,Coll_Principal,1,12,StaticCohortAvg,,4.0,,
+NON PRIME,202505,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202505,Coll_Principal,37,96,SegMedian,,,,Tail: no donor with MOB37+ data and positive correlation. SegMedian.
+NON PRIME,202505,InterestRevenue,5,12,ShapeBorrowScaled,,202503.0,ratio:4,Migrated from ScaledDonor: Early-MOB level-align: scale donor at last actual MOB4
+NON PRIME,202505,Total_Coverage_Ratio,0,999,ShapeBorrowScaled,,202504.0,ratio:4,Migrated from ScaledDonor
+NON PRIME,202506,Coll_Principal,1,12,DonorCohort,,202501.0,,v7.0h: Changed from StaticCohortAvg(3). DonorCohort(202501).
+NON PRIME,202506,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202506,Coll_Principal,37,96,SegMedian,,,,Tail: no donor with MOB37+ data and positive correlation. SegMedian.
+NON PRIME,202506,InterestRevenue,4,12,ShapeBorrowScaled,,202503.0,ratio:3,Migrated from ScaledDonor: Early-MOB level-align: scale donor at last actual MOB3
+NON PRIME,202506,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202506,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202507,Coll_Principal,1,12,DonorCohort,,202506.0,,v7.0h: Changed from StaticCohortAvg(2). DonorCohort(202506).
+NON PRIME,202507,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202507,Coll_Principal,37,96,SegMedian,,,,Tail: no donor with MOB37+ data and positive correlation. SegMedian.
+NON PRIME,202507,InterestRevenue,3,12,ShapeBorrowScaled,,202503.0,ratio:12,Migrated from ScaledDonor: ScaledDonor not feasible (last actual MOB2 < MOB_THRESHOLD); use donor shape/level
+NON PRIME,202507,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202507,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202508,Coll_Principal,1,12,StaticCohortAvg,,1.0,,
+NON PRIME,202508,Coll_Principal,13,36,SegMedian,,,,No mid-life actuals and no donor. SegMedian.
+NON PRIME,202508,Coll_Principal,37,96,SegMedian,,,,Tail: no donor with MOB37+ data and positive correlation. SegMedian.
+NON PRIME,202508,InterestRevenue,2,12,ShapeBorrowScaled,,202503.0,ratio:12,Migrated from ScaledDonor: ScaledDonor not feasible (last actual MOB2 < MOB_THRESHOLD); use donor shape/level
+NON PRIME,202508,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202508,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,202509,Coll_Interest,1,9,DonorCohort,,202412.0,,FIXED: Explicit Coll_Interest rule for 202509 NON PRIME using 202404 donor
+NON PRIME,202509,Coll_Principal,1,12,DonorCohort,,202507.0,,
+NON PRIME,202509,Coll_Principal,13,36,SegMedian,,,,v7.0a: 202509 had no rules. SegMedian for MOB 13-36.
+NON PRIME,202509,Coll_Principal,37,96,SegMedian,,,,v7.0a: 202509 had no rules. SegMedian for MOB 37-96.
+NON PRIME,202509,InterestRevenue,1,12,ShapeBorrowScaled,,202503.0,ratio:12,Migrated from ScaledDonor: ScaledDonor not feasible (last actual MOB2 < MOB_THRESHOLD); use donor shape/level
+NON PRIME,202509,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NON PRIME,202509,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NON PRIME,ALL,Coll_Interest,0,12,DonorCohort,,202404.0,,Young-donor
+NON PRIME,ALL,Coll_Interest,13,36,CohortTrend,,6.0,,Baseline: mid-MOB trend
+NON PRIME,ALL,Coll_Interest,37,999,CohortAvg,,6.0,,Baseline: mature flatten
+NON PRIME,ALL,Debt_Sale_Coverage_Ratio,0,999,Manual,,0.785,,DS coverage
+NON PRIME,ALL,Debt_Sale_Proceeds_Rate,0,999,Manual,,0.24,,Proceeds 24p
+NON PRIME,ALL,InterestRevenue,0,12,DonorCohort,,202404.0,,Young-donor
+NON PRIME,ALL,InterestRevenue,13,36,CohortAvg,,12.0,,Mid-trend
+NON PRIME,ALL,InterestRevenue,37,999,CohortAvg,,6.0,,Mature-flat
+NON PRIME,ALL,WO_DebtSold,0,999,SegMedian,,,,Portfolio decision
+NON PRIME,ALL,WO_Other,0,999,CohortAvg,,12.0,,Rare-12mo
+NRP-L,202301,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202301,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202404,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202404,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202405,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202405,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202406,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202406,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202407,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202407,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202408,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202408,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202409,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202409,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202410,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202410,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202411,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202411,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202412,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202412,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202501,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202501,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202502,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202502,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202503,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202503,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202504,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202504,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202505,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202505,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202506,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202506,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202507,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202507,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202508,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202508,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,202509,Coll_Interest,1,12,DonorCohort,,202404.0,,FIXED: Explicit Coll_Interest rule for 202509 NRP-L using 202404 donor
+NRP-L,202509,Coll_Principal,1,12,DonorCohort,,202507.0,,v7.0i: Updated donor from 202404 to 202507 for NRP-L 202509
+NRP-L,202509,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-L,202509,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-L,ALL,Coll_Interest,0,12,DonorCohort,,202405.0,,Young-donor
+NRP-L,ALL,Coll_Interest,13,36,CohortTrend,,6.0,,Baseline: mid-MOB trend
+NRP-L,ALL,Coll_Interest,37,999,CohortAvg,,6.0,,Baseline: mature flatten
+NRP-L,ALL,Coll_Principal,0,12,DonorCohort,,202405.0,,Young-donor
+NRP-L,ALL,Coll_Principal,13,36,StaticCohortAvg,,6.0,,v7.0i: CHANGED catch-all from CohortTrend(6) to StaticCohortAvg(6)
+NRP-L,ALL,Coll_Principal,37,999,CohortAvg,,6.0,,Mature-6mo
+NRP-L,ALL,Debt_Sale_Coverage_Ratio,0,999,Manual,,0.785,,DS coverage
+NRP-L,ALL,Debt_Sale_Proceeds_Rate,0,999,Manual,,0.24,,Proceeds 24p
+NRP-L,ALL,InterestRevenue,0,12,DonorCohort,,202405.0,,Young-donor
+NRP-L,ALL,InterestRevenue,13,36,CohortTrend,,6.0,,Mid-trend
+NRP-L,ALL,InterestRevenue,37,999,CohortAvg,,6.0,,Mature-flat
+NRP-L,ALL,WO_DebtSold,0,999,SegMedian,,,,Portfolio decision
+NRP-L,ALL,WO_Other,0,999,CohortAvg,,12.0,,Rare-12mo
+NRP-M,202001,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202001,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202101,Coll_Principal,13,36,CohortAvg,,12.0,,v6B: stabilise stressed mid-life cohorts
+NRP-M,202101,Coll_Principal,37,999,SegMedian,,,,v6B: tail cap for older cohorts
+NRP-M,202101,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202101,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202201,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202201,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202301,Coll_Principal,13,36,CohortAvg,,12.0,,v6B: stabilise stressed mid-life cohorts
+NRP-M,202301,Coll_Principal,37,999,SegMedian,,,,v6B: tail cap for older cohorts
+NRP-M,202301,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202301,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202404,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202404,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202405,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202405,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202406,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202406,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202407,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202407,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202408,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202408,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202409,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202409,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202410,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202410,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202411,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202411,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202412,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202412,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202501,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202501,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202502,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202502,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202503,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202503,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202504,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202504,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202505,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202505,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202506,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202506,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202507,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202507,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202508,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202508,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,202509,Coll_Interest,1,12,DonorCohort,,202404.0,,FIXED: Explicit Coll_Interest rule for 202509 NRP-M using 202404 donor
+NRP-M,202509,Coll_Principal,1,12,DonorCohort,,202404.0,,FIXED: Explicit Coll_Principal rule for 202509 NRP-M using 202404 donor
+NRP-M,202509,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-M,202509,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-M,ALL,Coll_Interest,0,12,DonorCohort,,202405.0,,Young-donor
+NRP-M,ALL,Coll_Interest,13,36,CohortTrend,,6.0,,Baseline: mid-MOB trend
+NRP-M,ALL,Coll_Interest,37,999,CohortAvg,,6.0,,Baseline: mature flatten
+NRP-M,ALL,Coll_Principal,0,12,DonorCohort,,202405.0,,Young-donor
+NRP-M,ALL,Coll_Principal,13,36,CohortAvg,,12.0,,CHANGED: Mid-trend to capture improving collections
+NRP-M,ALL,Coll_Principal,37,999,CohortAvg,,12.0,,Mature-6mo
+NRP-M,ALL,Debt_Sale_Coverage_Ratio,0,999,Manual,,0.785,,DS coverage
+NRP-M,ALL,Debt_Sale_Proceeds_Rate,0,999,Manual,,0.24,,Proceeds 24p
+NRP-M,ALL,InterestRevenue,0,12,DonorCohort,,202405.0,,Young-donor
+NRP-M,ALL,InterestRevenue,13,36,CohortTrend,,6.0,,Mid-trend
+NRP-M,ALL,InterestRevenue,37,999,CohortAvg,,6.0,,Mature-flat
+NRP-M,ALL,WO_DebtSold,0,999,SegMedian,,,,Portfolio decision
+NRP-M,ALL,WO_Other,0,999,CohortAvg,,12.0,,Rare-12mo
+NRP-S,201912,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,201912,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202001,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202001,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202101,Coll_Principal,13,36,CohortAvg,,12.0,,v6B: stabilise stressed mid-life cohorts
+NRP-S,202101,Coll_Principal,37,999,StaticCohortAvg,,12.0,,v7.0i: Changed from SegMedian to StaticCohortAvg(12) for NRP-S 202101 tail
+NRP-S,202101,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202101,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202201,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202201,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202301,Coll_Principal,13,36,CohortAvg,,6.0,,v7.0i: Changed Param1 from 12 to 6 for NRP-S 202301 MOB 13-36
+NRP-S,202301,Coll_Principal,37,999,StaticCohortAvg,,6.0,,v7.0i: Changed from SegMedian to StaticCohortAvg(6) for NRP-S 202301 tail
+NRP-S,202301,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202301,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202404,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202404,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202405,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202405,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202406,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202406,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202407,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202407,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202408,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202408,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202409,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202409,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202410,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202410,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202411,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202411,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202412,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202412,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202501,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202501,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202502,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202502,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202503,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202503,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202504,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202504,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202505,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202505,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202506,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202506,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202507,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202507,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202508,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202508,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,202509,Coll_Interest,1,12,DonorCohort,,202404.0,,FIXED: Explicit Coll_Interest rule for 202509 NRP-S using 202404 donor
+NRP-S,202509,Coll_Principal,1,12,DonorCohort,,202507.0,,v7.0i: Updated donor from 202404 to 202507 for NRP-S 202509
+NRP-S,202509,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+NRP-S,202509,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+NRP-S,ALL,Coll_Interest,0,12,DonorCohort,,202405.0,,Baseline: young donor
+NRP-S,ALL,Coll_Interest,13,36,CohortTrend,,6.0,,Baseline: mid-MOB trend
+NRP-S,ALL,Coll_Interest,37,999,CohortAvg,,6.0,,Baseline: mature flatten
+NRP-S,ALL,Coll_Principal,0,12,DonorCohort,,202405.0,,Young-donor
+NRP-S,ALL,Coll_Principal,13,36,StaticCohortAvg,,6.0,,v7.0i: Changed catch-all from CohortAvg(12) to StaticCohortAvg(6)
+NRP-S,ALL,Coll_Principal,37,999,CohortAvg,,12.0,,Mature-6mo
+NRP-S,ALL,Debt_Sale_Coverage_Ratio,0,999,Manual,,0.785,,DS coverage
+NRP-S,ALL,Debt_Sale_Proceeds_Rate,0,999,Manual,,0.24,,Proceeds 24p
+NRP-S,ALL,InterestRevenue,0,12,DonorCohort,,202405.0,,Young-donor
+NRP-S,ALL,InterestRevenue,13,36,CohortTrend,,6.0,,Mid-trend
+NRP-S,ALL,InterestRevenue,37,999,CohortAvg,,6.0,,Mature-flat
+NRP-S,ALL,WO_DebtSold,0,999,SegMedian,,,,Portfolio decision
+NRP-S,ALL,WO_Other,0,999,CohortAvg,,12.0,,Rare-12mo
+PRIME,202101,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202101,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,202201,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202201,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,202405,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202405,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,202407,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202407,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,202409,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202409,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,202504,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202504,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,202507,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202507,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,202508,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202508,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,202509,Coll_Interest,1,12,DonorCohort,,202404.0,,FIXED: Explicit Coll_Interest rule for 202509 PRIME using 202404 donor
+PRIME,202509,Coll_Principal,1,12,DonorCohort,,202407.0,,v7.0i: Updated donor from 202404 to 202407 for PRIME 202509
+PRIME,202509,Total_Coverage_Ratio,0,999,CohortTrend,,,,
+PRIME,202509,Total_Coverage_Ratio,37,999,CohortAvg,,6.0,,Tail cap: avoid long-run trend drift
+PRIME,ALL,Coll_Interest,0,12,DonorCohort,,202405.0,,Young-donor
+PRIME,ALL,Coll_Interest,13,999,CohortAvg,,6.0,,Mid/mature-6mo
+PRIME,ALL,Coll_Principal,0,12,DonorCohort,,202405.0,,Young-donor
+PRIME,ALL,Coll_Principal,13,36,CohortTrend,,6.0,,CHANGED: Mid-trend
+PRIME,ALL,Coll_Principal,37,999,CohortAvg,,12.0,,Mature-6mo
+PRIME,ALL,Debt_Sale_Coverage_Ratio,0,999,Manual,,0.785,,DS coverage
+PRIME,ALL,Debt_Sale_Proceeds_Rate,0,999,Manual,,0.24,,Proceeds 24p
+PRIME,ALL,InterestRevenue,0,12,DonorCohort,,202405.0,,Young-donor
+PRIME,ALL,InterestRevenue,13,36,CohortTrend,,6.0,,Mid-trend
+PRIME,ALL,InterestRevenue,37,999,CohortAvg,,6.0,,Mature-flat
+PRIME,ALL,WO_DebtSold,0,999,SegMedian,,,,Portfolio decision
+PRIME,ALL,WO_Other,0,999,CohortAvg,,12.0,,Rare-12mo
+NRP-L,202410,Coll_Principal,1,12,StaticCohortAvg,,11.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202410
+NRP-L,202411,Coll_Principal,1,12,StaticCohortAvg,,10.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202411
+NRP-L,202412,Coll_Principal,1,12,StaticCohortAvg,,9.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202412
+NRP-L,202501,Coll_Principal,1,12,StaticCohortAvg,,8.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202501
+NRP-L,202502,Coll_Principal,1,12,StaticCohortAvg,,7.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202502
+NRP-L,202503,Coll_Principal,1,12,StaticCohortAvg,,6.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202503
+NRP-L,202504,Coll_Principal,1,12,StaticCohortAvg,,5.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202504
+NRP-L,202505,Coll_Principal,1,12,StaticCohortAvg,,4.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202505
+NRP-L,202506,Coll_Principal,1,12,StaticCohortAvg,,3.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202506
+NRP-L,202507,Coll_Principal,1,12,StaticCohortAvg,,2.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202507
+NRP-L,202508,Coll_Principal,1,12,StaticCohortAvg,,1.0,,v7.0i: Own-avg override MOB 1-12 for NRP-L 202508
+NRP-L,202301,Coll_Principal,13,36,StaticCohortAvg,,12.0,,v7.0i: Own-avg override MOB 13-36 for NRP-L 202301
+NRP-L,202404,Coll_Principal,13,36,StaticCohortAvg,,6.0,,v7.0i: Own-avg override MOB 13-36 for NRP-L 202404
+NRP-L,202405,Coll_Principal,13,36,StaticCohortAvg,,6.0,,v7.0i: Own-avg override MOB 13-36 for NRP-L 202405
+NRP-L,202406,Coll_Principal,13,36,StaticCohortAvg,,6.0,,v7.0i: Own-avg override MOB 13-36 for NRP-L 202406
+NRP-L,202407,Coll_Principal,13,36,StaticCohortAvg,,6.0,,v7.0i: Own-avg override MOB 13-36 for NRP-L 202407
+NRP-L,202408,Coll_Principal,13,36,StaticCohortAvg,,6.0,,v7.0i: Own-avg override MOB 13-36 for NRP-L 202408
+NRP-L,202409,Coll_Principal,13,36,StaticCohortAvg,,6.0,,v7.0i: Own-avg override MOB 13-36 for NRP-L 202409
+NRP-S,202410,Coll_Principal,1,12,StaticCohortAvg,,11.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202410
+NRP-S,202411,Coll_Principal,1,12,StaticCohortAvg,,10.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202411
+NRP-S,202412,Coll_Principal,1,12,StaticCohortAvg,,9.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202412
+NRP-S,202501,Coll_Principal,1,12,StaticCohortAvg,,8.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202501
+NRP-S,202502,Coll_Principal,1,12,StaticCohortAvg,,7.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202502
+NRP-S,202503,Coll_Principal,1,12,StaticCohortAvg,,6.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202503
+NRP-S,202504,Coll_Principal,1,12,StaticCohortAvg,,5.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202504
+NRP-S,202505,Coll_Principal,1,12,StaticCohortAvg,,4.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202505
+NRP-S,202506,Coll_Principal,1,12,StaticCohortAvg,,3.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202506
+NRP-S,202507,Coll_Principal,1,12,StaticCohortAvg,,2.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202507
+NRP-S,202508,Coll_Principal,1,12,StaticCohortAvg,,1.0,,v7.0i: Own-avg override MOB 1-12 for NRP-S 202508
+PRIME,202101,Coll_Principal,37,96,StaticCohortAvg,,6.0,,v7.0i: Fix 202101 tail for PRIME - StaticCohortAvg(6)
+PRIME,202504,Coll_Principal,1,12,StaticCohortAvg,,5.0,,v7.0i: Fix 202504 donor spike MOB 1-12 PRIME - StaticCohortAvg(5)
+PRIME,202507,Coll_Principal,1,12,StaticCohortAvg,,2.0,,v7.0i: Fix 202507 donor spike MOB 1-12 PRIME - StaticCohortAvg(2)

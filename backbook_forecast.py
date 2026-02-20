@@ -50,6 +50,21 @@ class Config:
     # Debt sale months - calendar months when debt sales occur (quarterly)
     DS_MONTHS: List[int] = [3, 6, 9, 12]  # March, June, September, December
 
+    # Debt Sale Forecast Redesign (DSDonorCRScaled approach)
+    # (year, month) tuples excluded from calibration and donor construction
+    DS_OUTLIER_MONTHS: List[Tuple[int, int]] = [(2025, 12)]
+    # Number of most recent non-outlier DS event quarters to use when calibrating Layer B
+    DS_CALIBRATION_N_QUARTERS: int = 3
+    # Minimum post-sale DS observations a donor cohort must have to be eligible
+    DS_MIN_OBS_DONOR: int = 2
+    # Shrinkage target: alpha = min(1, N_own_obs / DS_SHRINKAGE_TARGET)
+    DS_SHRINKAGE_TARGET: int = 6
+    # DS rate cap multiplier: cap = DS_RATE_CAP_MULTIPLIER × segment historical max event rate
+    DS_RATE_CAP_MULTIPLIER: float = 1.5
+    # MOB window used to compute CR profile vectors for donor similarity
+    CR_SIM_MOB_START: int = 6
+    CR_SIM_MOB_END: int = 24
+
     # Rate caps by metric - wide ranges to accommodate data variance
     # Caps are sanity checks, not business rules. CohortAvg/methodology drive values.
     RATE_CAPS: Dict[str, Tuple[float, float]] = {
@@ -82,7 +97,7 @@ class Config:
     VALID_APPROACHES: List[str] = [
         'CohortAvg', 'CohortTrend', 'DonorCohort', 'ShapeBorrowScaled',
         'SegMedian', 'Manual', 'Zero', 'ScaledCohortAvg',
-        'StaticCohortAvg'
+        'StaticCohortAvg', 'DSDonorCRScaled',
     ]
 
     # Seasonality configuration
@@ -992,6 +1007,14 @@ def load_rate_methodology(filepath: str) -> pd.DataFrame:
     else:
         df['Param2'] = None
 
+    # Load Donor_Cohort column (used by DSDonorCRScaled approach)
+    if 'Donor_Cohort' in df.columns:
+        df['Donor_Cohort'] = df['Donor_Cohort'].apply(
+            lambda x: str(x).strip() if pd.notna(x) and str(x).strip() not in ('', 'nan') else None
+        )
+    else:
+        df['Donor_Cohort'] = None
+
     # Validate approaches
     invalid_approaches = df[~df['Approach'].isin(Config.VALID_APPROACHES)]['Approach'].unique()
     if len(invalid_approaches) > 0:
@@ -1478,7 +1501,8 @@ def get_methodology(methodology_df: pd.DataFrame, segment: str, cohort: str,
     return {
         'Approach': best_match['Approach'],
         'Param1': best_match['Param1'],
-        'Param2': best_match['Param2']
+        'Param2': best_match['Param2'],
+        'Donor_Cohort': best_match.get('Donor_Cohort', None),
     }
 
 
@@ -1998,7 +2022,8 @@ def fn_seg_median(curves_df: pd.DataFrame, segment: str, mob: int,
 # =============================================================================
 
 def apply_approach(curves_df: pd.DataFrame, segment: str, cohort: str,
-                   mob: int, metric: str, methodology: Dict[str, Any]) -> Dict[str, Any]:
+                   mob: int, metric: str, methodology: Dict[str, Any],
+                   ds_donor_curves: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     """
     Calculate rate using specified approach.
 
@@ -2008,7 +2033,9 @@ def apply_approach(curves_df: pd.DataFrame, segment: str, cohort: str,
         cohort: Target cohort
         mob: Target MOB
         metric: Target metric
-        methodology: Methodology rule dict with Approach, Param1, Param2
+        methodology: Methodology rule dict with Approach, Param1, Param2, Donor_Cohort
+        ds_donor_curves: Optional pre-computed DS donor curves DataFrame
+            (output of build_ds_donor_curves). Required for DSDonorCRScaled approach.
 
     Returns:
         dict: Rate and ApproachTag
@@ -2223,6 +2250,40 @@ def apply_approach(curves_df: pd.DataFrame, segment: str, cohort: str,
         else:
             return {'Rate': 0.0, 'ApproachTag': 'StaticCohortAvg_NoData_ERROR'}
 
+    elif approach == 'DSDonorCRScaled':
+        # DSDonorCRScaled: look up the pre-computed donor-derived DS rate from
+        # ds_donor_curves (built by build_ds_donor_curves).  The DS rate is
+        # non-zero only at the cohort's DS event MOBs.  A segment-level scaling
+        # factor (Layer B) is applied separately in run_one_step via the
+        # WO_DebtSold_ScaleFactor column in the rate lookup table.
+        #
+        # Fallback: SegMedian if ds_donor_curves is not available or has no match.
+        if ds_donor_curves is not None and len(ds_donor_curves) > 0:
+            cohort_clean = clean_cohort(cohort)
+            mask = (
+                (ds_donor_curves['Segment'] == segment) &
+                (ds_donor_curves['Cohort'] == cohort_clean) &
+                (ds_donor_curves['MOB'] == mob)
+            )
+            matches = ds_donor_curves[mask]
+            if len(matches) > 0:
+                row = matches.iloc[0]
+                rate = float(row['WO_DebtSold_Rate_DS'])
+                donor = str(row['DonorCohort'])
+                auto_flag = '(auto)' if row.get('IsAutoSelected', False) else ''
+                return {
+                    'Rate': rate,
+                    'ApproachTag': f'DSDonorCRScaled:{donor}{auto_flag}',
+                }
+            # MOB is not a DS event MOB for this cohort → rate is 0 (gated in run_one_step)
+            return {'Rate': 0.0, 'ApproachTag': 'DSDonorCRScaled:NonEventMOB'}
+
+        # Fallback if ds_donor_curves not yet built
+        seg_rate = fn_seg_median(curves_df, segment, mob, metric_col)
+        if seg_rate is not None:
+            return {'Rate': seg_rate, 'ApproachTag': 'DSDonorCRScaled_FallbackSegMedian'}
+        return {'Rate': 0.0, 'ApproachTag': 'DSDonorCRScaled_NoData_ERROR'}
+
     else:
         return {'Rate': 0.0, 'ApproachTag': f'UnknownApproach_ERROR:{approach}'}
 
@@ -2255,11 +2316,542 @@ def apply_rate_cap(rate: float, metric: str, approach_tag: str) -> float:
 
 
 # =============================================================================
+# SECTION 9B: DEBT SALE FORECASTING FUNCTIONS (DSDonorCRScaled)
+# =============================================================================
+#
+# Implements a hierarchical DS write-off forecast replacing the SegMedian approach.
+#
+# Layer A – Cohort-level DS curve generation (shape / allocation):
+#   For each cohort, build a WO_DebtSold_Rate curve indexed by MOB using a donor
+#   cohort selected via CR-curve similarity (or manually specified in the
+#   Rate_Methodology CSV via the Donor_Cohort column).  A shrinkage formula blends
+#   the cohort's own sparse history toward the donor curve.
+#
+# Layer B – Segment-level scaling (volume control):
+#   A per-segment scaling factor is calibrated on "normal" DS quarters
+#   (the most recent N non-outlier DS event quarters, excluding DS_OUTLIER_MONTHS).
+#   Applying this factor ensures cohort-level sums match historical quarterly behaviour.
+#
+# Both the raw (pre-scale) and scaled values are written to the forecast output.
+# The scaled value is used in the GBV bridge and impairment calculation.
+# =============================================================================
+
+
+def _get_ds_event_mobs_for_cohort(cohort: str, max_mob: int = 120) -> List[int]:
+    """
+    Return the list of MOBs that are DS event months for a cohort.
+
+    A DS event month is one whose calendar month falls in Config.DS_MONTHS.
+    The origination month is inferred from the last two digits of the cohort string
+    (YYYYMM format).
+
+    Args:
+        cohort: Cohort string in YYYYMM format (e.g. '202201')
+        max_mob: Maximum MOB to consider
+
+    Returns:
+        List[int]: MOBs (1-indexed) that align with DS calendar months
+    """
+    cohort_clean = clean_cohort(cohort)
+    try:
+        orig_month = int(cohort_clean[-2:])
+    except (ValueError, IndexError):
+        orig_month = 1  # fallback to January
+
+    ds_event_months = set(Config.DS_MONTHS)
+    return [
+        mob for mob in range(1, max_mob + 1)
+        if (((orig_month - 1) + (mob - 1)) % 12 + 1) in ds_event_months
+    ]
+
+
+def build_ds_event_history(fact_raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a clean DS event-month history from the raw actuals.
+
+    Filters to DS calendar months only (Config.DS_MONTHS) and excludes any
+    (year, month) pairs listed in Config.DS_OUTLIER_MONTHS (e.g. Dec-25).
+    Computes the event-month rate WO_DebtSold_Rate_Event = WO_DebtSold / OpeningGBV.
+
+    Args:
+        fact_raw: Raw historical data DataFrame (must include CalendarMonth, Segment,
+                  Cohort, MOB, OpeningGBV, WO_DebtSold)
+
+    Returns:
+        pd.DataFrame: DS event rows with columns
+            Segment, Cohort, MOB, CalendarMonth, OpeningGBV, WO_DebtSold,
+            WO_DebtSold_Rate_Event
+    """
+    df = fact_raw.copy()
+
+    # Keep only DS calendar months
+    df = df[df['CalendarMonth'].dt.month.isin(Config.DS_MONTHS)].copy()
+
+    # Remove outlier months (e.g. Dec-25)
+    for (yr, mo) in Config.DS_OUTLIER_MONTHS:
+        df = df[~((df['CalendarMonth'].dt.year == yr) &
+                  (df['CalendarMonth'].dt.month == mo))]
+
+    # Keep only rows with positive OpeningGBV
+    df = df[df['OpeningGBV'] > 0].copy()
+
+    df['WO_DebtSold_Rate_Event'] = df.apply(
+        lambda r: safe_divide(r['WO_DebtSold'], r['OpeningGBV']), axis=1
+    )
+
+    cols = ['Segment', 'Cohort', 'MOB', 'CalendarMonth',
+            'OpeningGBV', 'WO_DebtSold', 'WO_DebtSold_Rate_Event']
+    df = df[[c for c in cols if c in df.columns]].copy()
+
+    logger.info(
+        f"DS event history: {len(df)} event-month rows across "
+        f"{df['Segment'].nunique()} segments "
+        f"({df['CalendarMonth'].min().strftime('%Y-%m') if len(df) else 'n/a'} – "
+        f"{df['CalendarMonth'].max().strftime('%Y-%m') if len(df) else 'n/a'})"
+    )
+    return df.reset_index(drop=True)
+
+
+def _find_auto_donor(
+    ds_event_df: pd.DataFrame,
+    curves_base_df: pd.DataFrame,
+    segment: str,
+    target_cohort: str,
+) -> Optional[str]:
+    """
+    Auto-select a donor cohort for the target using CR-profile similarity.
+
+    Computes correlation distance (1 – Pearson correlation) between the target's
+    Total_Coverage_Ratio profile and each eligible donor's profile over
+    Config.CR_SIM_MOB_START … Config.CR_SIM_MOB_END.
+
+    A donor must have >= Config.DS_MIN_OBS_DONOR DS event observations
+    (in ds_event_df) to be eligible.
+
+    Args:
+        ds_event_df: DS event history (from build_ds_event_history)
+        curves_base_df: Historical rate curves (Segment × Cohort × MOB)
+        segment: Segment name
+        target_cohort: Target cohort string
+
+    Returns:
+        str or None: Best matching donor cohort, or None if no eligible donors found
+    """
+    # Eligible donors: >= DS_MIN_OBS_DONOR DS events, must not be the target itself
+    obs_counts = (
+        ds_event_df[ds_event_df['Segment'] == segment]
+        .groupby('Cohort')
+        .size()
+    )
+    eligible = [
+        c for c, n in obs_counts.items()
+        if n >= Config.DS_MIN_OBS_DONOR and c != clean_cohort(target_cohort)
+    ]
+    if not eligible:
+        return None
+
+    mob_range = list(range(Config.CR_SIM_MOB_START, Config.CR_SIM_MOB_END + 1))
+    seg_df = curves_base_df[curves_base_df['Segment'] == segment]
+
+    def get_cr_profile(cohort: str) -> Optional[np.ndarray]:
+        rows = (
+            seg_df[seg_df['Cohort'] == cohort]
+            .set_index('MOB')['Total_Coverage_Ratio']
+            .reindex(mob_range)
+        )
+        vals = rows.values
+        if np.isnan(vals).all():
+            return None
+        # Forward-fill then backward-fill NaNs within the window
+        s = pd.Series(vals).ffill().bfill()
+        return s.values
+
+    target_profile = get_cr_profile(clean_cohort(target_cohort))
+    if target_profile is None or target_profile.std() == 0:
+        # Cannot compute correlation – fall back to first eligible donor
+        return eligible[0]
+
+    best_donor: Optional[str] = None
+    best_distance = float('inf')
+
+    for donor in eligible:
+        donor_profile = get_cr_profile(donor)
+        if donor_profile is None:
+            continue
+        # Use only positions where both profiles have data
+        valid = ~(np.isnan(target_profile) | np.isnan(donor_profile))
+        if valid.sum() < 3:
+            continue
+        tv = target_profile[valid]
+        dv = donor_profile[valid]
+        if dv.std() == 0:
+            continue
+        corr = np.corrcoef(tv, dv)[0, 1]
+        distance = 1.0 - corr
+        if distance < best_distance:
+            best_distance = distance
+            best_donor = donor
+
+    return best_donor
+
+
+def build_ds_donor_curves(
+    ds_event_df: pd.DataFrame,
+    methodology_df: pd.DataFrame,
+    curves_base_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Build per-cohort DS rate curves (Layer A).
+
+    For each (Segment, Cohort) present in curves_base_df:
+    1. Find the donor cohort:
+       - If Rate_Methodology has a DSDonorCRScaled row with a non-AUTO Donor_Cohort,
+         use that cohort.
+       - Otherwise (AUTO / not specified), run CR-similarity to find the best donor.
+    2. Align DS events by event-number (not strict MOB) so that origination-month
+       differences between target and donor do not cause zero rates.
+    3. Apply shrinkage:  alpha = min(1, N_own / DS_SHRINKAGE_TARGET)
+       blended_rate = alpha × own_rate + (1-alpha) × donor_rate
+    4. Apply per-segment DS rate cap.
+    5. Extend beyond the donor's known history by holding the last observed
+       donor event rate flat.
+
+    Returns one row per (Segment, Cohort, MOB) for every MOB that is a DS event
+    month for that cohort (up to 120 MOBs).  Non-DS-event MOBs are omitted
+    (the rate lookup returns 0.0 for those via the DSDonorCRScaled handler).
+
+    Args:
+        ds_event_df: Output of build_ds_event_history
+        methodology_df: Loaded Rate_Methodology DataFrame (may have Donor_Cohort col)
+        curves_base_df: Historical rate curves (Segment × Cohort × MOB)
+
+    Returns:
+        pd.DataFrame: Columns:
+            Segment, Cohort, MOB, WO_DebtSold_Rate_DS, DonorCohort,
+            IsAutoSelected, N_DS_Obs_Target, N_DS_Obs_Donor, ShrinkageAlpha,
+            DS_Event_Number
+    """
+    # Pre-compute per-segment DS rate caps from historical maxima
+    seg_caps: Dict[str, float] = {}
+    for seg in ds_event_df['Segment'].unique():
+        seg_max = ds_event_df[ds_event_df['Segment'] == seg]['WO_DebtSold_Rate_Event'].max()
+        seg_caps[seg] = float(seg_max) * Config.DS_RATE_CAP_MULTIPLIER if seg_max > 0 else 1.0
+
+    results = []
+
+    all_segments = curves_base_df['Segment'].unique()
+    for seg in all_segments:
+        seg_df = curves_base_df[curves_base_df['Segment'] == seg]
+        cohorts = seg_df['Cohort'].unique()
+        ds_cap = seg_caps.get(seg, 1.0)
+
+        # Build a lookup: cohort → its DS event rows (indexed by event number)
+        def cohort_ds_events(coh: str) -> pd.Series:
+            """Returns DS event rates indexed by event number (0-based)."""
+            rows = ds_event_df[
+                (ds_event_df['Segment'] == seg) &
+                (ds_event_df['Cohort'] == coh)
+            ].sort_values('CalendarMonth')
+            return rows['WO_DebtSold_Rate_Event'].reset_index(drop=True)
+
+        for cohort in cohorts:
+            cohort_clean = clean_cohort(cohort)
+
+            # --- 1. Find donor ---
+            meth = get_methodology(methodology_df, seg, cohort_clean, 0, 'WO_DebtSold')
+            donor_cohort_raw = meth.get('Donor_Cohort')
+            is_auto = False
+
+            if (meth['Approach'] == 'DSDonorCRScaled'
+                    and donor_cohort_raw
+                    and str(donor_cohort_raw).upper() not in ('AUTO', 'NONE', 'NAN', '')):
+                donor_cohort = clean_cohort(str(donor_cohort_raw))
+            else:
+                # Auto-select via CR similarity
+                donor_cohort = _find_auto_donor(ds_event_df, curves_base_df, seg, cohort_clean)
+                is_auto = True
+
+            # --- 2. Gather own and donor event-rate series ---
+            own_events = cohort_ds_events(cohort_clean)
+            n_own = len(own_events)
+
+            donor_events: pd.Series
+            n_donor = 0
+            if donor_cohort:
+                donor_events = cohort_ds_events(donor_cohort)
+                n_donor = len(donor_events)
+            else:
+                # No donor available: use segment-level median rate as flat donor curve
+                seg_median_rate = ds_event_df[
+                    ds_event_df['Segment'] == seg
+                ]['WO_DebtSold_Rate_Event'].median()
+                donor_events = pd.Series(
+                    [seg_median_rate if pd.notna(seg_median_rate) else 0.0] * max(1, n_own)
+                )
+                donor_cohort = '_SegMedian'
+                is_auto = True
+
+            # --- 3. Shrinkage weight ---
+            alpha = min(1.0, n_own / Config.DS_SHRINKAGE_TARGET) if Config.DS_SHRINKAGE_TARGET > 0 else 1.0
+
+            # --- 4. DS event MOBs for this target cohort ---
+            target_ds_mobs = _get_ds_event_mobs_for_cohort(cohort_clean, max_mob=120)
+
+            # Last observed donor event rate (for forward extension beyond donor history)
+            last_donor_rate = float(donor_events.iloc[-1]) if len(donor_events) > 0 else 0.0
+
+            for event_num, target_mob in enumerate(target_ds_mobs):
+                # Own rate for this event number
+                own_rate = float(own_events.iloc[event_num]) if event_num < n_own else 0.0
+
+                # Donor rate for this event number (hold last flat if beyond donor history)
+                if event_num < len(donor_events):
+                    donor_rate = float(donor_events.iloc[event_num])
+                    last_donor_rate = donor_rate
+                else:
+                    donor_rate = last_donor_rate  # tail extension
+
+                # Blend
+                blended = alpha * own_rate + (1.0 - alpha) * donor_rate
+
+                # Apply cap
+                blended = min(blended, ds_cap)
+
+                results.append({
+                    'Segment': seg,
+                    'Cohort': cohort_clean,
+                    'MOB': target_mob,
+                    'WO_DebtSold_Rate_DS': blended,
+                    'DonorCohort': donor_cohort,
+                    'IsAutoSelected': is_auto,
+                    'N_DS_Obs_Target': n_own,
+                    'N_DS_Obs_Donor': n_donor,
+                    'ShrinkageAlpha': round(alpha, 4),
+                    'DS_Event_Number': event_num + 1,
+                })
+
+    if not results:
+        logger.warning("build_ds_donor_curves: no rows produced")
+        return pd.DataFrame(columns=[
+            'Segment', 'Cohort', 'MOB', 'WO_DebtSold_Rate_DS',
+            'DonorCohort', 'IsAutoSelected', 'N_DS_Obs_Target',
+            'N_DS_Obs_Donor', 'ShrinkageAlpha', 'DS_Event_Number',
+        ])
+
+    df_out = pd.DataFrame(results)
+    logger.info(
+        f"build_ds_donor_curves: {len(df_out)} rows across "
+        f"{df_out['Segment'].nunique()} segments, "
+        f"{df_out['Cohort'].nunique()} cohorts"
+    )
+    return df_out
+
+
+def calibrate_ds_scaling(
+    fact_raw: pd.DataFrame,
+    ds_event_df: pd.DataFrame,
+    ds_donor_curves_df: pd.DataFrame,
+) -> Tuple[Dict[str, float], pd.DataFrame]:
+    """
+    Calibrate per-segment Layer B scaling factors on normal DS quarters (Layer B).
+
+    Calibration months = the most recent Config.DS_CALIBRATION_N_QUARTERS non-outlier
+    DS event quarters found in fact_raw (typically Mar, Jun, Sep-25; Dec-25 is already
+    excluded by build_ds_event_history / DS_OUTLIER_MONTHS).
+
+    For each calibration month m and segment s:
+        actual_m  = Σ WO_DebtSold (actuals for that segment/month)
+        implied_m = Σ OpeningGBV × WO_DebtSold_Rate_DS  (from ds_donor_curves_df)
+        ratio_m   = actual_m / implied_m  (winsorised to [0.1, 10] and set to 1.0
+                                           with a warning if implied is 0)
+
+    ScaleFactor_s = median(ratio_m) over calibration months.
+
+    Args:
+        fact_raw: Full raw actuals
+        ds_event_df: DS event history (already filtered / outlier-excluded)
+        ds_donor_curves_df: Output of build_ds_donor_curves
+
+    Returns:
+        Tuple:
+          - Dict[str, float]: segment → ScaleFactor (1.0 if calibration not possible)
+          - pd.DataFrame: diagnostic table with per-month ratios and final factors
+    """
+    # Determine calibration months: last N unique CalendarMonths in ds_event_df
+    cal_months_all = sorted(ds_event_df['CalendarMonth'].unique(), reverse=True)
+    cal_months = cal_months_all[:Config.DS_CALIBRATION_N_QUARTERS]
+
+    if not cal_months:
+        logger.warning("calibrate_ds_scaling: no calibration months found")
+        segments = fact_raw['Segment'].unique() if 'Segment' in fact_raw.columns else []
+        return {s: 1.0 for s in segments}, pd.DataFrame()
+
+    logger.info(
+        f"DS scaling calibration months: "
+        + ", ".join(m.strftime('%Y-%m') for m in sorted(cal_months))
+    )
+
+    diag_rows = []
+    seg_ratios: Dict[str, List[float]] = {}
+
+    # Build a lookup for fast ds_donor_curves access
+    if len(ds_donor_curves_df) > 0:
+        ds_curve_lookup = ds_donor_curves_df.set_index(
+            ['Segment', 'Cohort', 'MOB']
+        )['WO_DebtSold_Rate_DS']
+    else:
+        ds_curve_lookup = pd.Series(dtype=float)
+
+    for cal_month in cal_months:
+        # Actual DS totals for this month
+        actual_month = fact_raw[fact_raw['CalendarMonth'] == cal_month]
+
+        for seg in fact_raw['Segment'].unique():
+            actual_seg = actual_month[actual_month['Segment'] == seg]['WO_DebtSold'].sum()
+
+            # Implied DS: Σ openingGBV × donor DS rate for cohorts active in this month
+            active = actual_month[
+                (actual_month['Segment'] == seg) &
+                (actual_month['OpeningGBV'] > 0)
+            ][['Cohort', 'MOB', 'OpeningGBV']]
+
+            implied_seg = 0.0
+            for _, row in active.iterrows():
+                coh = clean_cohort(row['Cohort'])
+                mob = int(row['MOB'])
+                key = (seg, coh, mob)
+                rate = float(ds_curve_lookup.get(key, 0.0)) if key in ds_curve_lookup.index else 0.0
+                implied_seg += row['OpeningGBV'] * rate
+
+            # Compute ratio
+            note = ''
+            if implied_seg <= 0:
+                ratio = 1.0
+                note = 'Implied=0; ratio set to 1'
+                logger.warning(
+                    f"DS scaling: implied=0 for {seg} in "
+                    f"{cal_month.strftime('%Y-%m')} – setting ratio=1"
+                )
+            else:
+                ratio = actual_seg / implied_seg
+                # Winsorise to [0.1, 10]
+                if ratio < 0.1 or ratio > 10:
+                    note = f'Winsorised from {ratio:.3f}'
+                    ratio = max(0.1, min(10.0, ratio))
+
+            seg_ratios.setdefault(seg, []).append(ratio)
+            diag_rows.append({
+                'Segment': seg,
+                'CalibrationMonth': cal_month.strftime('%Y-%m'),
+                'Actual_DS': round(actual_seg, 2),
+                'Implied_DS_PreScale': round(implied_seg, 2),
+                'Ratio': round(ratio, 4),
+                'Note': note,
+            })
+
+    # Final scale factor per segment = median of calibration-month ratios
+    scale_factors: Dict[str, float] = {}
+    for seg, ratios in seg_ratios.items():
+        sf = float(np.median(ratios))
+        scale_factors[seg] = sf
+
+    # Annotate diagnostic table with final factor
+    sf_map = scale_factors
+    diag_df = pd.DataFrame(diag_rows)
+    if len(diag_df) > 0:
+        diag_df['FinalScaleFactor'] = diag_df['Segment'].map(sf_map).fillna(1.0)
+        diag_df['CalibrationMonths'] = ', '.join(
+            m.strftime('%Y-%m') for m in sorted(cal_months)
+        )
+
+    for seg, sf in scale_factors.items():
+        logger.info(f"  DS scale factor [{seg}]: {sf:.4f}")
+
+    return scale_factors, diag_df
+
+
+def compute_cr_similarity_map(curves_base_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Offline diagnostic tool: compute full CR-similarity matrix for all cohorts
+    within each segment and return suggested donor mappings.
+
+    This function is NOT called during normal forecast runs.  Run it separately
+    (e.g., from a Jupyter notebook or a CLI wrapper) to review donor suggestions
+    before populating Donor_Cohort in Rate_Methodology.csv.
+
+    Args:
+        curves_base_df: Historical rate curves (Segment × Cohort × MOB)
+
+    Returns:
+        pd.DataFrame: Columns:
+            Segment, Cohort, SuggestedDonor, CorrelationDistance,
+            CR_MOB_Start, CR_MOB_End
+    """
+    mob_range = list(range(Config.CR_SIM_MOB_START, Config.CR_SIM_MOB_END + 1))
+    results = []
+
+    for seg in curves_base_df['Segment'].unique():
+        seg_df = curves_base_df[curves_base_df['Segment'] == seg]
+        cohorts = seg_df['Cohort'].unique()
+
+        # Build profile matrix
+        profiles: Dict[str, np.ndarray] = {}
+        for coh in cohorts:
+            vals = (
+                seg_df[seg_df['Cohort'] == coh]
+                .set_index('MOB')['Total_Coverage_Ratio']
+                .reindex(mob_range)
+            )
+            s = pd.Series(vals.values).ffill().bfill()
+            profiles[coh] = s.values
+
+        for target in cohorts:
+            tv = profiles[target]
+            if np.isnan(tv).all() or tv.std() == 0:
+                results.append({
+                    'Segment': seg, 'Cohort': target,
+                    'SuggestedDonor': None, 'CorrelationDistance': None,
+                    'CR_MOB_Start': Config.CR_SIM_MOB_START,
+                    'CR_MOB_End': Config.CR_SIM_MOB_END,
+                })
+                continue
+
+            best_donor = None
+            best_dist = float('inf')
+            for donor in cohorts:
+                if donor == target:
+                    continue
+                dv = profiles[donor]
+                valid = ~(np.isnan(tv) | np.isnan(dv))
+                if valid.sum() < 3:
+                    continue
+                if dv[valid].std() == 0:
+                    continue
+                corr = np.corrcoef(tv[valid], dv[valid])[0, 1]
+                dist = 1.0 - corr
+                if dist < best_dist:
+                    best_dist = dist
+                    best_donor = donor
+
+            results.append({
+                'Segment': seg,
+                'Cohort': target,
+                'SuggestedDonor': best_donor,
+                'CorrelationDistance': round(best_dist, 4) if best_donor else None,
+                'CR_MOB_Start': Config.CR_SIM_MOB_START,
+                'CR_MOB_End': Config.CR_SIM_MOB_END,
+            })
+
+    return pd.DataFrame(results)
+
+
+# =============================================================================
 # SECTION 10: RATE LOOKUP BUILDER
 # =============================================================================
 
 def build_rate_lookup(seed: pd.DataFrame, curves: pd.DataFrame,
-                      methodology: pd.DataFrame, max_months: int) -> pd.DataFrame:
+                      methodology: pd.DataFrame, max_months: int,
+                      ds_donor_curves: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     Build rate lookup table for forecast with rolling CohortAvg.
 
@@ -2272,6 +2864,8 @@ def build_rate_lookup(seed: pd.DataFrame, curves: pd.DataFrame,
         curves: Extended curves
         methodology: Methodology rules
         max_months: Forecast horizon
+        ds_donor_curves: Optional pre-computed DS donor curves (from build_ds_donor_curves).
+            When provided, enables the DSDonorCRScaled approach for WO_DebtSold.
 
     Returns:
         pd.DataFrame: Rate lookup table
@@ -2318,7 +2912,10 @@ def build_rate_lookup(seed: pd.DataFrame, curves: pd.DataFrame,
                 meth = get_methodology(methodology, segment, cohort, mob, metric)
 
                 # Apply approach using working_curves (includes previous forecasts)
-                result = apply_approach(working_curves, segment, cohort, mob, metric, meth)
+                result = apply_approach(
+                    working_curves, segment, cohort, mob, metric, meth,
+                    ds_donor_curves=ds_donor_curves,
+                )
 
                 # Apply cap
                 capped_rate = apply_rate_cap(result['Rate'], metric, result['ApproachTag'])
@@ -2549,16 +3146,22 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
         interest_revenue = opening_gbv * rates.get('InterestRevenue_Rate', 0.0) / 12  # Monthly
 
         # WO_DebtSold only occurs in debt sale months (Mar, Jun, Sep, Dec)
+        # For DSDonorCRScaled: compute raw amount (pre-scale) then apply Layer B factor.
+        # For all other approaches: scale_factor = 1.0 (no change).
         if is_debt_sale_month(forecast_month):
-            wo_debt_sold = opening_gbv * rates.get('WO_DebtSold_Rate', 0.0)
+            wo_debt_sold_raw = opening_gbv * rates.get('WO_DebtSold_Rate', 0.0)
+            ds_scale_factor = float(rates.get('WO_DebtSold_ScaleFactor', 1.0))
+            wo_debt_sold = wo_debt_sold_raw * ds_scale_factor  # scaled value used in GBV
         else:
+            wo_debt_sold_raw = 0.0
+            ds_scale_factor = float(rates.get('WO_DebtSold_ScaleFactor', 1.0))
             wo_debt_sold = 0.0
 
         wo_other = opening_gbv * rates.get('WO_Other_Rate', 0.0)
         contra_principal = opening_gbv * rates.get('ContraSettlements_Principal_Rate', 0.0)
         contra_interest = opening_gbv * rates.get('ContraSettlements_Interest_Rate', 0.0)
 
-        # Calculate closing GBV
+        # Calculate closing GBV (uses scaled WO_DebtSold so GBV bridge is consistent)
         closing_gbv = (
             opening_gbv +
             interest_revenue -
@@ -2595,8 +3198,8 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
         # Core coverage is back-solved in post-processing for months BEFORE debt sales
         # =======================================================================
 
-        # Raw amounts for GBV mechanics (positive values)
-        debt_sale_wo_raw = wo_debt_sold  # Raw positive amount used in GBV calc
+        # Scaled WO_DebtSold is used throughout GBV mechanics (provision release, proceeds)
+        debt_sale_wo_raw = wo_debt_sold  # wo_debt_sold is already scaled; used in provision calc
         ds_coverage_ratio = Config.DS_COVERAGE_RATIO  # Fixed 78.5%
         ds_proceeds_rate = Config.DS_PROCEEDS_RATE  # Fixed 24p per £1 of GBV sold
 
@@ -2616,7 +3219,8 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
         ds_proceeds = ds_proceeds_rate * debt_sale_wo_raw
 
         # Store write-offs as POSITIVE (absolute amounts)
-        wo_debt_sold_stored = wo_debt_sold
+        # wo_debt_sold is the scaled value; wo_debt_sold_raw is the pre-scale value
+        wo_debt_sold_stored = wo_debt_sold   # scaled (used in GBV bridge & impairment)
         wo_other_stored = wo_other
 
         # Step 5: Calculate Non-DS provision movement
@@ -2656,6 +3260,7 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
             'InterestRevenue_Approach': rates.get('InterestRevenue_Approach', ''),
             'WO_DebtSold_Rate': rates.get('WO_DebtSold_Rate', 0.0),
             'WO_DebtSold_Approach': rates.get('WO_DebtSold_Approach', ''),
+            'WO_DebtSold_ScaleFactor': round(ds_scale_factor, 6),
             'WO_Other_Rate': rates.get('WO_Other_Rate', 0.0),
             'WO_Other_Approach': rates.get('WO_Other_Approach', ''),
             'NewLoanAmount_Rate': rates.get('NewLoanAmount_Rate', 0.0),
@@ -2670,7 +3275,8 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
             'Coll_Principal': round(coll_principal, 2),
             'Coll_Interest': round(coll_interest, 2),
             'InterestRevenue': round(interest_revenue, 2),
-            'WO_DebtSold': round(wo_debt_sold_stored, 2),  # POSITIVE (absolute amount)
+            'WO_DebtSold_Raw': round(wo_debt_sold_raw, 2),    # pre-scale (donor curve × GBV)
+            'WO_DebtSold': round(wo_debt_sold_stored, 2),  # POSITIVE scaled amount (used in GBV bridge)
             'WO_Other': round(wo_other_stored, 2),  # POSITIVE (absolute amount)
             'ContraSettlements_Principal': round(contra_principal, 2),
             'ContraSettlements_Interest': round(contra_interest, 2),
@@ -3657,7 +4263,9 @@ def generate_comprehensive_transparency_report(
     output_dir: str,
     max_months: int,
     backtest: Optional[pd.DataFrame] = None,
-    ex_contra_actuals: Optional[pd.DataFrame] = None
+    ex_contra_actuals: Optional[pd.DataFrame] = None,
+    ds_donor_map: Optional[pd.DataFrame] = None,
+    ds_scale_factors_diag: Optional[pd.DataFrame] = None,
 ) -> str:
     """
     Generate single comprehensive Excel report with full audit trail and all outputs.
@@ -4173,6 +4781,13 @@ def generate_comprehensive_transparency_report(
         if len(curve_comparison_monthly) > 0:
             curve_comparison_monthly.to_excel(writer, sheet_name='17_Curve_Comparison_Monthly', index=False)
 
+        # DS Diagnostics sheets (written when DSDonorCRScaled infrastructure is active)
+        if ds_donor_map is not None and len(ds_donor_map) > 0:
+            ds_donor_map.to_excel(writer, sheet_name='18_DS_Donor_Map', index=False)
+
+        if ds_scale_factors_diag is not None and len(ds_scale_factors_diag) > 0:
+            ds_scale_factors_diag.to_excel(writer, sheet_name='19_DS_ScaleFactors', index=False)
+
     logger.info(f"Comprehensive report saved to: {output_path}")
 
     print("\n" + "=" * 70)
@@ -4204,6 +4819,11 @@ def generate_comprehensive_transparency_report(
         print("    - 16_Curve_Comparison: Actual historical rates vs forecast-applied rates by cohort/MOB")
     if len(curve_comparison_monthly) > 0:
         print("    - 17_Curve_Comparison_Monthly: Forecast vs backtest actual rates aligned by month")
+    if ds_donor_map is not None and len(ds_donor_map) > 0:
+        print("  DS DIAGNOSTICS:")
+        print("    - 18_DS_Donor_Map: Donor cohort assignments, CR similarity, shrinkage weights")
+    if ds_scale_factors_diag is not None and len(ds_scale_factors_diag) > 0:
+        print("    - 19_DS_ScaleFactors: Layer B calibration: actual vs implied DS per segment/quarter")
 
     return output_path
 
@@ -4307,9 +4927,33 @@ def run_backbook_forecast(fact_raw_path: str, methodology_path: str,
         logger.info("\n[Step 4/9] Generating seeds...")
         seed = generate_seed_curves(fact_raw)
 
+        # 4b. Build DS donor curves and calibrate Layer B scaling (DSDonorCRScaled)
+        # These run for all segments regardless of whether DSDonorCRScaled is active in
+        # the methodology CSV.  The resulting diagnostics are always written to the
+        # transparency report (sheets 18 & 19).  The ds_donor_curves DataFrame is only
+        # used by apply_approach() when the Approach column is 'DSDonorCRScaled'.
+        logger.info("\n[Step 4b/9] Building DS donor curves and calibrating Layer B scaling...")
+        ds_event_df = build_ds_event_history(fact_raw)
+        ds_donor_curves = build_ds_donor_curves(ds_event_df, methodology, curves_base)
+        ds_scale_factors, ds_scale_factors_diag = calibrate_ds_scaling(
+            fact_raw, ds_event_df, ds_donor_curves
+        )
+        # Merge per-segment scaling factors into a rate_lookup column so run_one_step
+        # can read them without needing a new parameter.
+        # The column is added AFTER build_rate_lookup returns, then read in run_one_step.
+
         # 5. Build rate lookups
         logger.info("\n[Step 5/9] Building rate lookups...")
-        rate_lookup = build_rate_lookup(seed, curves_extended, methodology, max_months)
+        rate_lookup = build_rate_lookup(
+            seed, curves_extended, methodology, max_months,
+            ds_donor_curves=ds_donor_curves,
+        )
+        # Attach per-segment DS scaling factors so run_one_step can apply Layer B.
+        # Non-DSDonorCRScaled segments receive 1.0 (no change to existing behaviour).
+        rate_lookup['WO_DebtSold_ScaleFactor'] = (
+            rate_lookup['Segment'].map(ds_scale_factors).fillna(1.0)
+        )
+
         # Use curves_base for coverage ratio lookups instead of impairment_curves.
         # impairment_curves computes coverage ratios by aggregating across CalendarMonth
         # first (mixing different MOBs together when a cohort has sub-groups), which
@@ -4376,7 +5020,9 @@ def run_backbook_forecast(fact_raw_path: str, methodology_path: str,
                 output_dir=output_dir,
                 max_months=max_months,
                 backtest=backtest,
-                ex_contra_actuals=ex_contra_actuals
+                ex_contra_actuals=ex_contra_actuals,
+                ds_donor_map=ds_donor_curves if len(ds_donor_curves) > 0 else None,
+                ds_scale_factors_diag=ds_scale_factors_diag if len(ds_scale_factors_diag) > 0 else None,
             )
         else:
             # Generate separate output files
