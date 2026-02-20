@@ -2545,14 +2545,28 @@ def build_ds_donor_curves(
         cohorts = seg_df['Cohort'].unique()
         ds_cap = seg_caps.get(seg, 1.0)
 
-        # Build a lookup: cohort → its DS event rows (indexed by event number)
+        # Build a lookup: cohort → its DS event rates by event number (0-based).
+        # We aggregate to CalendarMonth level first so that clustered cohorts
+        # (which have many MOBs per CalendarMonth in the raw data) are treated
+        # as one DS event per quarter rather than one per MOB.
         def cohort_ds_events(coh: str) -> pd.Series:
-            """Returns DS event rates indexed by event number (0-based)."""
+            """Returns CalendarMonth-aggregated DS event rates (0-based event index)."""
             rows = ds_event_df[
                 (ds_event_df['Segment'] == seg) &
                 (ds_event_df['Cohort'] == coh)
-            ].sort_values('CalendarMonth')
-            return rows['WO_DebtSold_Rate_Event'].reset_index(drop=True)
+            ]
+            if len(rows) == 0:
+                return pd.Series(dtype=float)
+            # Aggregate WO_DebtSold and OpeningGBV across all MOBs per CalendarMonth
+            agg = (
+                rows.groupby('CalendarMonth')
+                .agg(WO_DebtSold=('WO_DebtSold', 'sum'),
+                     OpeningGBV=('OpeningGBV', 'sum'))
+                .reset_index()
+                .sort_values('CalendarMonth')
+            )
+            agg['rate'] = agg['WO_DebtSold'] / agg['OpeningGBV'].clip(lower=1e-8)
+            return agg['rate'].reset_index(drop=True)
 
         for cohort in cohorts:
             cohort_clean = clean_cohort(cohort)
@@ -2694,13 +2708,29 @@ def calibrate_ds_scaling(
     diag_rows = []
     seg_ratios: Dict[str, List[float]] = {}
 
-    # Build a lookup for fast ds_donor_curves access
+    # Build (Segment, Cohort, CalendarMonth) → event_number mapping.
+    # This handles clustered cohorts (many MOBs per CalendarMonth) by
+    # aggregating to CalendarMonth level before assigning event numbers.
+    ds_agg_hist = (
+        ds_event_df
+        .groupby(['Segment', 'Cohort', 'CalendarMonth'])
+        .agg(WO_DebtSold=('WO_DebtSold', 'sum'),
+             OpeningGBV=('OpeningGBV', 'sum'))
+        .reset_index()
+        .sort_values(['Segment', 'Cohort', 'CalendarMonth'])
+    )
+    cal_event_num: Dict[tuple, int] = {}
+    for (seg_c, coh_c), grp in ds_agg_hist.groupby(['Segment', 'Cohort']):
+        for ev_num, (_, row) in enumerate(grp.iterrows(), start=1):
+            cal_event_num[(seg_c, clean_cohort(str(coh_c)), row['CalendarMonth'])] = ev_num
+
+    # Build (Segment, Cohort, DS_Event_Number) → rate lookup from donor curves
     if len(ds_donor_curves_df) > 0:
-        ds_curve_lookup = ds_donor_curves_df.set_index(
-            ['Segment', 'Cohort', 'MOB']
+        ds_curve_by_event = ds_donor_curves_df.set_index(
+            ['Segment', 'Cohort', 'DS_Event_Number']
         )['WO_DebtSold_Rate_DS']
     else:
-        ds_curve_lookup = pd.Series(dtype=float)
+        ds_curve_by_event = pd.Series(dtype=float)
 
     for cal_month in cal_months:
         # Actual DS totals for this month
@@ -2709,19 +2739,28 @@ def calibrate_ds_scaling(
         for seg in fact_raw['Segment'].unique():
             actual_seg = actual_month[actual_month['Segment'] == seg]['WO_DebtSold'].sum()
 
-            # Implied DS: Σ openingGBV × donor DS rate for cohorts active in this month
-            active = actual_month[
+            # Implied DS: aggregate OpeningGBV by cohort (summing all MOBs),
+            # then look up the donor curve rate via the event-number mapping.
+            # This correctly handles clustered cohorts whose GBV is spread
+            # across many MOBs per CalendarMonth.
+            seg_month = actual_month[
                 (actual_month['Segment'] == seg) &
                 (actual_month['OpeningGBV'] > 0)
-            ][['Cohort', 'MOB', 'OpeningGBV']]
+            ]
+            cohort_gbv = seg_month.groupby('Cohort')['OpeningGBV'].sum()
 
             implied_seg = 0.0
-            for _, row in active.iterrows():
-                coh = clean_cohort(row['Cohort'])
-                mob = int(row['MOB'])
-                key = (seg, coh, mob)
-                rate = float(ds_curve_lookup.get(key, 0.0)) if key in ds_curve_lookup.index else 0.0
-                implied_seg += row['OpeningGBV'] * rate
+            for coh, gbv in cohort_gbv.items():
+                coh_clean = clean_cohort(str(coh))
+                ev_key = (seg, coh_clean, cal_month)
+                event_num = cal_event_num.get(ev_key)
+                if event_num is not None:
+                    rate_key = (seg, coh_clean, event_num)
+                    if rate_key in ds_curve_by_event.index:
+                        rate = float(ds_curve_by_event[rate_key])
+                    else:
+                        rate = 0.0
+                    implied_seg += gbv * rate
 
             # Compute ratio
             note = ''
