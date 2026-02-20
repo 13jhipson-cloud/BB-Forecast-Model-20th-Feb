@@ -1,0 +1,208 @@
+1) What this model is (high-level)
+backbook_forecast.py is a single-script forecasting engine for backbook portfolios. It forecasts flows (collections, write-offs, revenue), then derives stock metrics (GBV, provision, NBV), using methodology rules by segment/cohort/MOB/metric. It can run normally or in cutoff/backtest mode and can emit a comprehensive transparency workbook. 
+
+2) Core configuration and model scope
+The Config class drives model behavior:
+
+Default horizon: 12 months.
+
+Default lookback: 6.
+
+MOB threshold: 3.
+
+DS constants: coverage 0.785, proceeds rate 0.24, debt sale months Mar/Jun/Sep/Dec.
+
+Rate caps by metric (sanity caps).
+
+Valid approaches include classic and newer ones (StaticCohortAvg, ShapeBorrowScaled).
+
+Optional toggles for seasonality and overlays. 
+
+3) Input model and raw data transform behavior
+Fact data loading
+load_fact_raw supports CSV/XLSX, detects “raw” shape and transforms if needed, enforces required columns, parses CalendarMonth, coerces numerics, and sorts data. 
+
+Raw transformer (important for cohort/MOB semantics)
+If raw format is detected, the script:
+
+Renames raw columns.
+
+Parses cohorts and applies cohort clustering (e.g., 202101/202201/202301 bucket logic).
+
+Builds segment from LOB + loan size.
+
+Calculates MOB as month difference (0-based style formula).
+
+Filters negative MOB and adds month-end calendar dates/days-in-month. 
+
+Methodology file loading
+load_rate_methodology now includes encoding fallback (utf-8, utf-8-sig, cp1252, latin1) to avoid Windows CSV decode failures, then cleans fields and validates approach names. 
+
+4) Mathematical engine: curves and flow forecasting
+Historical curves
+calculate_curves_base aggregates to Segment×Cohort×MOB and calculates rates such as:
+
+Coll_Principal_Rate = Coll_Principal / OpeningGBV
+
+Coll_Interest_Rate = Coll_Interest / OpeningGBV
+
+InterestRevenue_Rate annualized using days-in-month
+
+Writeoff and contra rates
+
+Coverage and DS ratios from historical actuals. 
+
+Seed generation
+Forecast starts from last actual month:
+
+Seed BoM = last month closing GBV reported.
+
+Seed MOB = last historical MOB + 1.
+
+ForecastMonth = last actual month + 1 month. 
+
+Methodology selection logic
+get_methodology matches rules where Segment/Cohort/Metric can be exact or ALL, and MOB in range; best rule chosen by specificity score:
+
++8 exact segment
+
++4 exact cohort
+
++2 exact metric
+
+tie-break by narrower MOB range. 
+
+5) Rate approaches (what developer needs to know)
+apply_approach is the switchboard for all methodology behaviors. 
+
+Key approaches:
+
+Manual, Zero, SegMedian, CohortTrend, DonorCohort, CohortAvg, ScaledDonor, ScaledCohortAvg.
+
+StaticCohortAvg: averages actual-only rows, excluding forecast-appended rows (__is_forecast=True) to prevent recursive drift.
+
+ShapeBorrowScaled: borrow donor shape and anchor to target level with additive/ratio configuration (mode/ref/amp/cap) via Param2. 
+
+6) Rolling lookup behavior (very important)
+build_rate_lookup works month-by-month and appends just-generated forecast rates back into working_curves, enabling rolling methodologies to consume prior forecast months in later steps. It marks appended rows as __is_forecast=True. 
+
+This is why StaticCohortAvg exists: it intentionally avoids this self-referential compounding by filtering forecast rows out. 
+
+7) Forecast step mechanics (amount bridge)
+In run_one_step, for each Segment×Cohort×MOB row:
+
+Amounts are rate × opening GBV.
+
+Interest revenue is annual rate divided by 12.
+
+WO_DebtSold only applied in DS months.
+
+ClosingGBV = OpeningGBV + InterestRevenue - |Coll_Principal| - |Coll_Interest| - WO_DebtSold - WO_Other.
+
+Closing GBV floored at zero.
+Then provision/impairment/NBV are computed. 
+
+8) Debt-sale and impairment logic (critical before refactor)
+Current logic in the forecast step:
+
+Total_Provision_Balance = ClosingGBV × Total_Coverage_Ratio.
+
+Total_Provision_Movement = Provision_t - Provision_t-1.
+
+DS_Provision_Release = DS_Coverage_Ratio × DS_WriteOffs.
+
+DS_Proceeds = DS_Proceeds_Rate × DS_WriteOffs.
+
+Non_DS_Provision_Movement = Total_Provision_Movement + DS_Provision_Release.
+
+Gross_Impairment_ExcludingDS = -Non_DS_Provision_Movement - WO_Other.
+
+Debt_Sale_Impact = -DS_WriteOffs + DS_Provision_Release + DS_Proceeds.
+
+Net_Impairment = Gross_Impairment_ExcludingDS + Debt_Sale_Impact.
+
+ClosingNBV = ClosingGBV - Total_Provision_Balance. 
+
+Historical impairment preprocessing also normalizes sign conventions (writeoffs/proceeds/releases to positive abs values) before constructing impairment curves and components. 
+
+This is exactly the area your new developer should isolate behind tests before changing DS writeoff mechanics.
+
+9) Cutoff/backtest semantics (common confusion)
+When --cutoff YYYY-MM is provided:
+
+Data is filtered to CalendarMonth < cutoff month (so Sept is included for cutoff Oct).
+
+Cohorts with origination >= cutoff yyyymm are excluded.
+
+First forecast month becomes cutoff month.
+
+Backtest and ex-contra comparisons are generated from full data. 
+
+10) Transparency/report outputs and QC sheets
+Comprehensive workbook (Forecast_Transparency_Report.xlsx) can include:
+
+Core sheets 1..13,
+
+14_Backtest_Comparison,
+
+15_ExContra_Actuals,
+
+16_Curve_Comparison,
+
+17_Curve_Comparison_Monthly. 
+
+16_Curve_Comparison is forecast-anchored (by forecast month/MOB), and if backtest exists it enriches with backtest rate, backtest MOB, and MOB_Alignment_Diff. 17 is month-aligned and pivot-friendly. 
+
+11) CLI and orchestration flow
+Entrypoint:
+
+Required: --fact-raw, --methodology.
+
+Optional: --debt-sale, --months, --output, --cutoff, --ex-contra, --transparency-report.
+
+Calls run_backbook_forecast(...) pipeline:
+
+load,
+
+curves,
+
+impairment curves,
+
+seeds,
+
+lookups,
+
+forecast,
+
+outputs,
+
+backtest/ex-contra (if cutoff),
+
+export. 
+
+12) Practical handover notes for your new dev (debt-sale writeoff changes)
+I’d ask them to do this in order:
+
+Snapshot current DS behavior with regression tests around run_one_step and impairment preprocessing.
+
+Add tests around sign conventions and month gating (DS months only).
+
+Decide where DS writeoff truth should come from:
+
+rate-driven from rate_lookup,
+
+explicit schedule-driven from debt_sale_schedule,
+
+or hybrid.
+
+Keep transparency columns/backtest alignment intact so business users can audit deltas pre/post-change.
+
+Validate impacts in:
+
+5_Forecast_Output
+
+11_Impairment
+
+12_Reconciliation
+
+16/17 for rate behavior sanity. 
