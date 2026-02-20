@@ -2615,9 +2615,6 @@ def build_ds_donor_curves(
             last_donor_rate = float(donor_events.iloc[-1]) if len(donor_events) > 0 else 0.0
 
             for event_num, target_mob in enumerate(target_ds_mobs):
-                # Own rate for this event number
-                own_rate = float(own_events.iloc[event_num]) if event_num < n_own else 0.0
-
                 # Donor rate for this event number (hold last flat if beyond donor history)
                 if event_num < len(donor_events):
                     donor_rate = float(donor_events.iloc[event_num])
@@ -2625,8 +2622,15 @@ def build_ds_donor_curves(
                 else:
                     donor_rate = last_donor_rate  # tail extension
 
-                # Blend
-                blended = alpha * own_rate + (1.0 - alpha) * donor_rate
+                if event_num < n_own:
+                    # Own data exists for this event: blend with shrinkage weight
+                    own_rate = float(own_events.iloc[event_num])
+                    blended = alpha * own_rate + (1.0 - alpha) * donor_rate
+                else:
+                    # No own data yet for this future event: use 100% donor rate.
+                    # Applying alpha × 0 + (1-alpha) × donor would wrongly give only
+                    # (1-alpha) fraction of the donor rate for cohorts with partial history.
+                    blended = donor_rate
 
                 # Apply cap
                 blended = min(blended, ds_cap)
@@ -4820,9 +4824,53 @@ def generate_comprehensive_transparency_report(
         if len(curve_comparison_monthly) > 0:
             curve_comparison_monthly.to_excel(writer, sheet_name='17_Curve_Comparison_Monthly', index=False)
 
-        # DS Diagnostics sheets (written when DSDonorCRScaled infrastructure is active)
+        # ── DS Diagnostics sheets ──────────────────────────────────────────────
+        # Sheet 18: One-row-per-cohort donor summary (readable at a glance)
+        # Sheet 19: Layer B calibration detail (actual vs implied by quarter)
+        # Sheet 20: Pre-scale DS rate profiles as event-number pivot
         if ds_donor_map is not None and len(ds_donor_map) > 0:
-            ds_donor_map.to_excel(writer, sheet_name='18_DS_Donor_Map', index=False)
+            # Build a clean 1-row-per-(Segment,Cohort) summary ─────────────────
+            donor_summary = (
+                ds_donor_map
+                .drop_duplicates(subset=['Segment', 'Cohort'])
+                [['Segment', 'Cohort', 'DonorCohort', 'IsAutoSelected',
+                  'N_DS_Obs_Target', 'N_DS_Obs_Donor', 'ShrinkageAlpha']]
+                .rename(columns={
+                    'DonorCohort':     'Donor_Cohort',
+                    'IsAutoSelected':  'Auto_CR_Selected',
+                    'N_DS_Obs_Target': 'N_Own_DS_Events',
+                    'N_DS_Obs_Donor':  'N_Donor_DS_Events',
+                    'ShrinkageAlpha':  'Shrinkage_Alpha (own weight)',
+                })
+                .sort_values(['Segment', 'Cohort'])
+            )
+            donor_summary.to_excel(writer, sheet_name='18_DS_Donor_Map', index=False)
+
+            # Build event-number rate-profile pivot ───────────────────────────
+            # Rows = Segment+Cohort, columns = DS event number, values = rate %
+            rate_pivot_rows = []
+            for seg in ds_donor_map['Segment'].unique():
+                for coh in ds_donor_map[ds_donor_map['Segment'] == seg]['Cohort'].unique():
+                    mask = (ds_donor_map['Segment'] == seg) & (ds_donor_map['Cohort'] == coh)
+                    sub = ds_donor_map[mask].sort_values('DS_Event_Number')
+                    row: Dict[str, Any] = {
+                        'Segment': seg,
+                        'Cohort': coh,
+                        'Donor_Cohort': sub['DonorCohort'].iloc[0],
+                        'Shrinkage_Alpha': sub['ShrinkageAlpha'].iloc[0],
+                    }
+                    for _, r in sub.iterrows():
+                        ev = int(r['DS_Event_Number'])
+                        row[f'E{ev:02d}_Rate_pct'] = round(r['WO_DebtSold_Rate_DS'] * 100, 2)
+                    rate_pivot_rows.append(row)
+            if rate_pivot_rows:
+                rate_pivot_df = (
+                    pd.DataFrame(rate_pivot_rows)
+                    .sort_values(['Segment', 'Cohort'])
+                )
+                rate_pivot_df.to_excel(
+                    writer, sheet_name='20_DS_Rate_Profiles', index=False
+                )
 
         if ds_scale_factors_diag is not None and len(ds_scale_factors_diag) > 0:
             ds_scale_factors_diag.to_excel(writer, sheet_name='19_DS_ScaleFactors', index=False)
@@ -4859,10 +4907,11 @@ def generate_comprehensive_transparency_report(
     if len(curve_comparison_monthly) > 0:
         print("    - 17_Curve_Comparison_Monthly: Forecast vs backtest actual rates aligned by month")
     if ds_donor_map is not None and len(ds_donor_map) > 0:
-        print("  DS DIAGNOSTICS:")
-        print("    - 18_DS_Donor_Map: Donor cohort assignments, CR similarity, shrinkage weights")
+        print("  DS DIAGNOSTICS (DSDonorCRScaled):")
+        print("    - 18_DS_Donor_Map: 1 row per cohort — donor assigned, shrinkage alpha, own/donor obs count")
+        print("    - 20_DS_Rate_Profiles: Pre-scale DS rate % by event number (cohort × event pivot per segment)")
     if ds_scale_factors_diag is not None and len(ds_scale_factors_diag) > 0:
-        print("    - 19_DS_ScaleFactors: Layer B calibration: actual vs implied DS per segment/quarter")
+        print("    - 19_DS_ScaleFactors: Layer B calibration — actual vs implied DS per segment/quarter")
 
     return output_path
 
