@@ -51,17 +51,17 @@ class Config:
     DS_MONTHS: List[int] = [3, 6, 9, 12]  # March, June, September, December
 
     # Debt Sale Forecast Redesign (DSDonorCRScaled approach)
-    # (year, month) tuples excluded from calibration and donor construction
+    # Outlier months excluded from Layer B calibration (year, month)
     DS_OUTLIER_MONTHS: List[Tuple[int, int]] = [(2025, 12)]
-    # Number of most recent non-outlier DS event quarters to use when calibrating Layer B
+    # Number of most-recent non-outlier DS quarters used for Layer B calibration
     DS_CALIBRATION_N_QUARTERS: int = 3
-    # Minimum post-sale DS observations a donor cohort must have to be eligible
+    # Minimum DS event observations for a cohort to be an eligible donor
     DS_MIN_OBS_DONOR: int = 2
-    # Shrinkage target: alpha = min(1, N_own_obs / DS_SHRINKAGE_TARGET)
+    # Shrinkage target: alpha = min(1, N_own_events / DS_SHRINKAGE_TARGET)
     DS_SHRINKAGE_TARGET: int = 6
-    # DS rate cap multiplier: cap = DS_RATE_CAP_MULTIPLIER × segment historical max event rate
+    # DS rate cap = DS_RATE_CAP_MULTIPLIER × segment historical max event rate
     DS_RATE_CAP_MULTIPLIER: float = 1.5
-    # MOB window used to compute CR profile vectors for donor similarity
+    # MOB range used for CR-similarity donor auto-selection
     CR_SIM_MOB_START: int = 6
     CR_SIM_MOB_END: int = 24
 
@@ -97,11 +97,11 @@ class Config:
     VALID_APPROACHES: List[str] = [
         'CohortAvg', 'CohortTrend', 'DonorCohort', 'ShapeBorrowScaled',
         'SegMedian', 'Manual', 'Zero', 'ScaledCohortAvg',
-        'StaticCohortAvg', 'DSDonorCRScaled',
+        'StaticCohortAvg', 'DSDonorCRScaled'
     ]
 
     # Seasonality configuration
-    ENABLE_SEASONALITY: bool = False  # Disable seasonal adjustment for coverage ratios
+    ENABLE_SEASONALITY: bool = False   # Enable seasonal adjustment for coverage ratios
     SEASONALITY_METRIC: str = 'Total_Coverage_Ratio'  # Metric to apply seasonality to
 
     # Overlay configuration
@@ -1717,6 +1717,131 @@ def fn_cohort_trend(curves_df: pd.DataFrame, segment: str, cohort: str,
     return float(predicted)
 
 
+def fn_cohort_linear_trend(curves_df: pd.DataFrame, segment: str, cohort: str,
+                           mob: int, metric_col: str, n_window: int) -> Optional[float]:
+    """
+    Windowed linear regression extrapolation (CohortLinearTrend).
+
+    Same as fn_cohort_trend but fits OLS over only the last n_window actual MOBs
+    rather than the full history. Captures recent local trend rather than the full
+    lifecycle arc — useful when a cohort's behaviour has recently shifted direction.
+
+    Args:
+        curves_df: Curves DataFrame
+        segment: Target segment
+        cohort: Target cohort
+        mob: Target MOB
+        metric_col: Column name for metric rate
+        n_window: Number of most recent actual MOBs to include in regression
+
+    Returns:
+        float or None: Predicted rate at target MOB (uncapped)
+    """
+    cohort_str = clean_cohort(cohort)
+
+    if mob <= Config.MOB_THRESHOLD + 1:
+        min_mob_filter = 1
+    else:
+        min_mob_filter = Config.MOB_THRESHOLD
+
+    mask = (
+        (curves_df['Segment'] == segment) &
+        (curves_df['Cohort'] == cohort_str) &
+        (curves_df['MOB'] >= min_mob_filter) &
+        (curves_df['MOB'] < mob)
+    )
+
+    data = curves_df[mask].copy()
+
+    if len(data) < 2:
+        return None
+
+    if metric_col not in data.columns:
+        return None
+
+    # Take only the last n_window MOBs (most recent)
+    data_windowed = (data.sort_values('MOB', ascending=False)
+                        .head(n_window)
+                        .sort_values('MOB'))
+
+    x = data_windowed['MOB'].values
+    y = data_windowed[metric_col].values
+
+    valid_mask = ~np.isnan(y)
+    if valid_mask.sum() < 2:
+        return None
+
+    x = x[valid_mask]
+    y = y[valid_mask]
+
+    n = len(x)
+    sum_x = np.sum(x)
+    sum_y = np.sum(y)
+    sum_xy = np.sum(x * y)
+    sum_xx = np.sum(x * x)
+
+    denominator = n * sum_xx - sum_x * sum_x
+    if denominator == 0:
+        return None
+
+    b = (n * sum_xy - sum_x * sum_y) / denominator
+    a = (sum_y - b * sum_x) / n
+
+    predicted = a + b * mob
+
+    if np.isnan(predicted) or np.isinf(predicted):
+        return None
+
+    return float(predicted)
+
+
+def fn_peer_cohort_avg(curves_df: pd.DataFrame, segment: str,
+                       mob: int, metric_col: str,
+                       peer_cohorts: List[str]) -> Optional[float]:
+    """
+    MOB-aligned average across explicit peer cohorts (PeerCohortAvg).
+
+    For each peer cohort, looks up their actual historical rate at the exact
+    target MOB. Peers that have no data at that MOB are silently skipped.
+    Returns the simple mean of all peers that do have data.
+
+    Creates a 'consensus level' at each MOB — useful for understanding where
+    a cohort should sit relative to vintage peers, without inheriting any single
+    donor's idiosyncratic trajectory.
+
+    Args:
+        curves_df: Curves DataFrame
+        segment: Target segment
+        mob: Target MOB
+        metric_col: Column name for metric rate
+        peer_cohorts: Explicit list of peer cohort strings (e.g. ['202201', '202204'])
+
+    Returns:
+        float or None: Mean peer rate at the target MOB, or None if no peers
+        have data at that MOB
+    """
+    peer_rates = []
+
+    for peer in peer_cohorts:
+        peer_str = clean_cohort(str(peer).strip())
+        peer_mask = (
+            (curves_df['Segment'] == segment) &
+            (curves_df['Cohort'] == peer_str) &
+            (curves_df['MOB'] == mob) &
+            (curves_df[metric_col].notna())
+        )
+        peer_data = curves_df[peer_mask]
+        if not peer_data.empty:
+            rate_val = peer_data[metric_col].iloc[0]
+            if not pd.isna(rate_val):
+                peer_rates.append(float(rate_val))
+
+    if not peer_rates:
+        return None
+
+    return float(np.mean(peer_rates))
+
+
 def fn_donor_cohort(curves_df: pd.DataFrame, segment: str, donor_cohort: str,
                     mob: int, metric_col: str) -> Optional[float]:
     """
@@ -1770,12 +1895,13 @@ def fn_shape_borrow_scaled(curves_df: pd.DataFrame, segment: str, cohort: str,
     ADDITIVE MODE (preferred for principal collections):
         r̂(m) = Lc + (rd(m) - r̄d_ref)
         where:
-            Lc     = target cohort's mean rate over the last `ref_window` ACTUAL MOBs
+            Lc     = target cohort's mean rate over MOB 2 to max_actual_mob (overlap mean)
             rd(m)  = donor rate at forecast MOB m
-            r̄d_ref = donor's mean rate over the same ref_window MOBs as Lc
+            r̄d_ref = donor's mean rate over the SAME MOB 2–max_actual_mob range as Lc
 
-        This preserves absolute step sizes (e.g., MOB 36→37 spike in bps)
-        and anchors the level to the target's own recent actuals.
+        Both Lc and r̄d_ref are computed over the same life-stage window, so the
+        level shift (Lc - r̄d_ref) is a clean vintage-level performance comparison.
+        MOB 1 is excluded (first-payment noise). ref_window param unused in additive.
 
     RATIO MODE (for metrics where relative shape is more meaningful):
         r̂(m) = rd(m) × (Lc / rd_ref_single)
@@ -1856,16 +1982,31 @@ def fn_shape_borrow_scaled(curves_df: pd.DataFrame, segment: str, cohort: str,
     target_actuals_sorted = target_actuals.sort_values('MOB', ascending=False)
 
     if mode == 'additive':
-        # Lc = mean of most recent ref_window actual MOBs
-        recent_actuals = target_actuals_sorted.head(ref_window)
-        if len(recent_actuals) < 1:
-            result['error'] = f"Insufficient actuals for {cohort_str} (need >=1, got 0)"
+        # FIX v7.0k3: Overlap mean approach (2025-02-23)
+        # Lc = mean of target actuals from MOB 2 to max_actual_mob.
+        # Previously used last ref_window MOBs (recent tail), which created a
+        # temporal mismatch with donor_mean_ref (donor's first ref_window MOBs).
+        # Now both means cover the same MOB range, making the level shift
+        # (Lc - donor_mean_ref) a clean vintage-level performance comparison.
+        # MOB 1 excluded as it is noisy (first-payment effects).
+        overlap_actuals_mask = (
+            (curves_df['Segment'] == segment) &
+            (curves_df['Cohort'] == cohort_str) &
+            (curves_df['MOB'] >= 2)
+        )
+        if '__is_forecast' in curves_df.columns:
+            overlap_actuals_mask = overlap_actuals_mask & (curves_df['__is_forecast'] != True)
+        overlap_actuals = curves_df[overlap_actuals_mask]
+        if len(overlap_actuals) < 1:
+            result['error'] = f"Insufficient actuals for {cohort_str} (no rows from MOB 2+)"
             return result
-        Lc_values = recent_actuals[metric_col].dropna()
+        max_actual_mob_target = int(overlap_actuals['MOB'].max())
+        Lc_values = overlap_actuals[metric_col].dropna()
         if len(Lc_values) == 0:
             result['error'] = f"All actuals are NaN for {cohort_str}"
             return result
         Lc = float(Lc_values.mean())
+        result['overlap_mob_max'] = max_actual_mob_target  # Traceability
     else:
         # ratio mode: Lc = target rate at single anchor MOB
         # ref_window is treated as the specific anchor MOB number
@@ -1914,22 +2055,27 @@ def fn_shape_borrow_scaled(curves_df: pd.DataFrame, segment: str, cohort: str,
     # STEP 3: Compute shape adjustment and final rate
     # -------------------------------------------------------------------------
     if mode == 'additive':
-        # Compute donor mean over the same ref_window MOBs
-        # This de-means the donor shape so we're borrowing relative movement only
+        # FIX v7.0k3: Donor mean over same MOB range as target Lc (MOB 2 to max_actual_mob_target).
+        # Previously used donor's first ref_window MOBs (ascending sort, head(ref_window)),
+        # while Lc used the target's most recent tail — a temporal mismatch that
+        # over-inflated shape_adjustment for maturing cohorts with steep donor tails.
+        # Excluding forecast rows prevents rolling-window contamination.
         donor_ref_mask = (
             (curves_df['Segment'] == segment) &
             (curves_df['Cohort'] == donor_cohort_str) &
-            (curves_df['MOB'] >= Config.MOB_THRESHOLD)
+            (curves_df['MOB'] >= 2) &
+            (curves_df['MOB'] <= max_actual_mob_target)
         )
-        donor_ref_data = curves_df[donor_ref_mask].sort_values('MOB', ascending=False)
+        if '__is_forecast' in curves_df.columns:
+            donor_ref_mask = donor_ref_mask & (curves_df['__is_forecast'] != True)
+        donor_ref_data = curves_df[donor_ref_mask]
 
         if len(donor_ref_data) == 0:
-            result['error'] = f"No donor reference data for {donor_cohort_str}"
+            result['error'] = (f"No donor reference data for {donor_cohort_str} "
+                               f"over MOB 2-{max_actual_mob_target}")
             return result
 
-        # Use the same ref_window depth as the target's Lc computation
-        donor_ref_window = donor_ref_data.head(ref_window)
-        donor_ref_values = donor_ref_window[metric_col].dropna()
+        donor_ref_values = donor_ref_data[metric_col].dropna()
         if len(donor_ref_values) == 0:
             result['error'] = f"All donor reference values are NaN for {donor_cohort_str}"
             return result
@@ -2033,9 +2179,7 @@ def apply_approach(curves_df: pd.DataFrame, segment: str, cohort: str,
         cohort: Target cohort
         mob: Target MOB
         metric: Target metric
-        methodology: Methodology rule dict with Approach, Param1, Param2, Donor_Cohort
-        ds_donor_curves: Optional pre-computed DS donor curves DataFrame
-            (output of build_ds_donor_curves). Required for DSDonorCRScaled approach.
+        methodology: Methodology rule dict with Approach, Param1, Param2
 
     Returns:
         dict: Rate and ApproachTag
@@ -2250,16 +2394,216 @@ def apply_approach(curves_df: pd.DataFrame, segment: str, cohort: str,
         else:
             return {'Rate': 0.0, 'ApproachTag': 'StaticCohortAvg_NoData_ERROR'}
 
+    elif approach.startswith('CohortLinearTrend'):
+        # CohortLinearTrend(N): windowed linear regression over last N actual MOBs.
+        # Unlike CohortTrend (full-history OLS), this fits only the most recent N
+        # observations — capturing local trend direction rather than the full lifecycle arc.
+        # Param1 = N (number of MOBs); also parseable from approach string e.g. CohortLinearTrend(6)
+        try:
+            n_window = int(approach.split('(')[1].rstrip(')'))
+        except (IndexError, ValueError):
+            try:
+                n_window = int(float(param1)) if param1 and param1 != 'None' else 6
+            except (ValueError, TypeError):
+                n_window = 6
+
+        rate = fn_cohort_linear_trend(curves_df, segment, cohort, mob, metric_col, n_window)
+        if rate is not None:
+            return {'Rate': rate, 'ApproachTag': f'CohortLinearTrend({n_window})'}
+        else:
+            seg_rate = fn_seg_median(curves_df, segment, mob, metric_col)
+            if seg_rate is not None:
+                return {'Rate': seg_rate, 'ApproachTag': f'CohortLinearTrend({n_window})_FallbackSegMedian'}
+            else:
+                return {'Rate': 0.0, 'ApproachTag': f'CohortLinearTrend({n_window})_NoData_ERROR'}
+
+    elif approach == 'ShapeBorrowScaled_Blend':
+        # SBS_Blend: weighted blend of multiple donor cohorts' SBS outputs.
+        # Param1 = donor:weight pairs e.g. "202201:0.5,202204:0.3,202207:0.2"
+        #          (weights are normalised so they don't need to sum to 1.0)
+        # Param2 = mode (additive or ratio), same as ShapeBorrowScaled
+        if param1 is None or param1 == 'None':
+            return {'Rate': 0.0, 'ApproachTag': 'ShapeBorrowScaled_Blend_NoParam_ERROR'}
+
+        param2 = methodology.get('Param2')
+        mode = 'additive'
+        ref_window = 12
+        if param2 and str(param2) not in ('None', 'nan', ''):
+            param2_str = str(param2).strip()
+            if ':' in param2_str:
+                parts = param2_str.split(':', 1)
+                mode = parts[0].strip().lower()
+                try:
+                    ref_window = int(float(parts[1].strip()))
+                except (ValueError, TypeError):
+                    ref_window = 12
+            else:
+                mode = param2_str.lower()
+                ref_window = 6 if mode == 'ratio' else 12
+        if mode not in ('additive', 'ratio'):
+            mode = 'additive'
+
+        # Parse donor:weight pairs
+        donor_weight_pairs = []
+        total_weight = 0.0
+        for pair_str in str(param1).split(','):
+            pair_str = pair_str.strip()
+            if ':' in pair_str:
+                parts = pair_str.split(':', 1)
+                donor_code = clean_cohort(parts[0].strip())
+                try:
+                    weight = float(parts[1].strip())
+                except ValueError:
+                    weight = 1.0
+            else:
+                donor_code = clean_cohort(pair_str)
+                weight = 1.0
+            if donor_code:
+                donor_weight_pairs.append((donor_code, weight))
+                total_weight += weight
+
+        if not donor_weight_pairs or total_weight == 0:
+            return {'Rate': 0.0, 'ApproachTag': 'ShapeBorrowScaled_Blend_NoDonors_ERROR'}
+
+        # Normalise weights so they sum to 1.0
+        donor_weight_pairs = [(d, w / total_weight) for d, w in donor_weight_pairs]
+
+        blended_rate = 0.0
+        successful_donors = []
+        for donor, weight in donor_weight_pairs:
+            sbs_result = fn_shape_borrow_scaled(
+                curves_df, segment, cohort, donor, mob, metric_col, mode, ref_window
+            )
+            if sbs_result['success']:
+                blended_rate += sbs_result['final_rate'] * weight
+                successful_donors.append(f"{donor}:{weight:.2f}")
+
+        if not successful_donors:
+            seg_rate = fn_seg_median(curves_df, segment, mob, metric_col)
+            if seg_rate is not None:
+                return {'Rate': seg_rate, 'ApproachTag': 'ShapeBorrowScaled_Blend_FallbackSegMedian'}
+            return {'Rate': 0.0, 'ApproachTag': 'ShapeBorrowScaled_Blend_NoData_ERROR'}
+
+        donors_tag = ','.join(successful_donors)
+        return {
+            'Rate': blended_rate,
+            'ApproachTag': f'SBS_Blend({donors_tag},{mode})',
+        }
+
+    elif approach == 'ShapeBorrowScaled_Bounded':
+        # SBS_Bounded: ShapeBorrowScaled with hard min/max caps on the output rate.
+        # Useful when SBS would otherwise inherit an extreme donor trajectory.
+        # Param1 = donor cohort (YYYYMM)
+        # Param2 = "additive,minRate=-0.100,maxRate=-0.050"
+        #          (minRate and maxRate are optional; either or both can be specified)
+        if param1 is None or param1 == 'None':
+            return {'Rate': 0.0, 'ApproachTag': 'ShapeBorrowScaled_Bounded_NoParam_ERROR'}
+
+        donor = clean_cohort(param1)
+        param2 = methodology.get('Param2')
+        mode = 'additive'
+        ref_window = 12
+        min_rate = None
+        max_rate = None
+
+        if param2 and str(param2) not in ('None', 'nan', ''):
+            param2_str = str(param2).strip()
+            tokens = [t.strip() for t in param2_str.split(',')]
+            if tokens:
+                mode_token = tokens[0].lower()
+                if ':' in mode_token:
+                    m_parts = mode_token.split(':', 1)
+                    mode = m_parts[0]
+                    try:
+                        ref_window = int(float(m_parts[1]))
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    mode = mode_token
+            for token in tokens[1:]:
+                if token.lower().startswith('minrate='):
+                    try:
+                        min_rate = float(token.split('=', 1)[1])
+                    except ValueError:
+                        pass
+                elif token.lower().startswith('maxrate='):
+                    try:
+                        max_rate = float(token.split('=', 1)[1])
+                    except ValueError:
+                        pass
+
+        if mode not in ('additive', 'ratio'):
+            mode = 'additive'
+
+        sbs_result = fn_shape_borrow_scaled(
+            curves_df, segment, cohort, donor, mob, metric_col, mode, ref_window
+        )
+
+        if sbs_result['success']:
+            final_rate = sbs_result['final_rate']
+            Lc = sbs_result['Lc']
+            adj = sbs_result['shape_adjustment']
+
+            # Apply bounds (rates are negative, so minRate is less negative = upper bound,
+            # maxRate is more negative = lower bound)
+            clipped = False
+            if min_rate is not None and final_rate > min_rate:
+                final_rate = min_rate
+                clipped = True
+            if max_rate is not None and final_rate < max_rate:
+                final_rate = max_rate
+                clipped = True
+
+            bounds_tag = f',bounds=[{min_rate},{max_rate}]' if (min_rate is not None or max_rate is not None) else ''
+            clip_tag = ',CLIPPED' if clipped else ''
+            tag = f"SBS_Bounded:{donor}({mode},Lc={Lc:.4f},adj={adj:+.4f}{bounds_tag}{clip_tag})"
+            return {
+                'Rate': final_rate,
+                'ApproachTag': tag,
+                'ShapeBorrow_Donor': donor,
+                'ShapeBorrow_Mode': mode,
+                'ShapeBorrow_Lc': Lc,
+                'ShapeBorrow_ShapeAdj': adj,
+                'ShapeBorrow_FinalRate': final_rate,
+            }
+        else:
+            rate = fn_donor_cohort(curves_df, segment, donor, mob, metric_col)
+            if rate is not None:
+                return {
+                    'Rate': rate,
+                    'ApproachTag': f'SBS_Bounded_FallbackDonor:{donor}',
+                    'ShapeBorrow_Error': sbs_result.get('error', 'Unknown error'),
+                }
+            return {
+                'Rate': 0.0,
+                'ApproachTag': f'SBS_Bounded_NoData_ERROR:{donor}',
+            }
+
+    elif approach == 'PeerCohortAvg':
+        # PeerCohortAvg: MOB-aligned consensus average across explicit peer cohorts.
+        # For each listed peer, reads their actual historical rate at the target MOB.
+        # Peers with no data at that MOB are silently skipped.
+        # Param1 = comma-separated peer cohort list e.g. "202201,202204,202207"
+        if param1 is None or param1 == 'None':
+            return {'Rate': 0.0, 'ApproachTag': 'PeerCohortAvg_NoParam_ERROR'}
+
+        peer_cohorts = [c.strip() for c in str(param1).split(',') if c.strip()]
+        if not peer_cohorts:
+            return {'Rate': 0.0, 'ApproachTag': 'PeerCohortAvg_NoPeers_ERROR'}
+
+        rate = fn_peer_cohort_avg(curves_df, segment, mob, metric_col, peer_cohorts)
+        if rate is not None:
+            peers_tag = ','.join(peer_cohorts)
+            return {'Rate': rate, 'ApproachTag': f'PeerCohortAvg({peers_tag})'}
+        else:
+            seg_rate = fn_seg_median(curves_df, segment, mob, metric_col)
+            if seg_rate is not None:
+                return {'Rate': seg_rate, 'ApproachTag': 'PeerCohortAvg_FallbackSegMedian'}
+            return {'Rate': 0.0, 'ApproachTag': 'PeerCohortAvg_NoData_ERROR'}
+
     elif approach == 'DSDonorCRScaled':
-        # DSDonorCRScaled: look up the pre-computed donor-derived DS rate from
-        # ds_donor_curves (built by build_ds_donor_curves).  The DS rate is
-        # non-zero only at the cohort's DS event MOBs.  A segment-level scaling
-        # factor (Layer B) is applied separately in run_one_step via the
-        # WO_DebtSold_ScaleFactor column in the rate lookup table.
-        #
-        # Fallback: SegMedian if ds_donor_curves is not available or has no match.
+        cohort_clean = clean_cohort(cohort)
         if ds_donor_curves is not None and len(ds_donor_curves) > 0:
-            cohort_clean = clean_cohort(cohort)
             mask = (
                 (ds_donor_curves['Segment'] == segment) &
                 (ds_donor_curves['Cohort'] == cohort_clean) &
@@ -2271,14 +2615,10 @@ def apply_approach(curves_df: pd.DataFrame, segment: str, cohort: str,
                 rate = float(row['WO_DebtSold_Rate_DS'])
                 donor = str(row['DonorCohort'])
                 auto_flag = '(auto)' if row.get('IsAutoSelected', False) else ''
-                return {
-                    'Rate': rate,
-                    'ApproachTag': f'DSDonorCRScaled:{donor}{auto_flag}',
-                }
-            # MOB is not a DS event MOB for this cohort → rate is 0 (gated in run_one_step)
+                return {'Rate': rate, 'ApproachTag': f'DSDonorCRScaled:{donor}{auto_flag}'}
+            # MOB is not a DS event month for this cohort → zero rate
             return {'Rate': 0.0, 'ApproachTag': 'DSDonorCRScaled:NonEventMOB'}
-
-        # Fallback if ds_donor_curves not yet built
+        # Fallback: ds_donor_curves not yet built, use SegMedian
         seg_rate = fn_seg_median(curves_df, segment, mob, metric_col)
         if seg_rate is not None:
             return {'Rate': seg_rate, 'ApproachTag': 'DSDonorCRScaled_FallbackSegMedian'}
@@ -2889,6 +3229,8 @@ def compute_cr_similarity_map(curves_base_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================================================================
+
+# =============================================================================
 # SECTION 10: RATE LOOKUP BUILDER
 # =============================================================================
 
@@ -2907,8 +3249,6 @@ def build_rate_lookup(seed: pd.DataFrame, curves: pd.DataFrame,
         curves: Extended curves
         methodology: Methodology rules
         max_months: Forecast horizon
-        ds_donor_curves: Optional pre-computed DS donor curves (from build_ds_donor_curves).
-            When provided, enables the DSDonorCRScaled approach for WO_DebtSold.
 
     Returns:
         pd.DataFrame: Rate lookup table
@@ -2926,6 +3266,31 @@ def build_rate_lookup(seed: pd.DataFrame, curves: pd.DataFrame,
     working_curves = curves.copy()
     if '__is_forecast' not in working_curves.columns:
         working_curves['__is_forecast'] = False
+
+    # FIX v7.0k4: Mark flat-forwarded extended rows as __is_forecast = True.
+    # extend_curves() creates rows for MOB > last_actual_mob by flat-forwarding
+    # the last actual rate. These rows default to __is_forecast = False, which
+    # causes fn_shape_borrow_scaled() to treat them as genuine actuals when
+    # computing max_actual_mob_target, Lc, and donor_mean_ref.
+    #
+    # Without this fix (e.g. for 202407 with last actual MOB = 14):
+    #   - max_actual_mob_target is inflated to the extended max MOB (e.g. 35)
+    #   - Lc is diluted by many flat-forwarded rows all equal to the last actual rate
+    #   - donor_mean_ref spans the donor's deep mid-life rates (MOBs 15-35)
+    #   - Result: a visible step-change at the actual→forecast boundary
+    #
+    # Fix: use seed.MOB (each cohort's first forecast MOB) to identify and
+    # pre-mark all flat-forwarded extended rows before the rolling window starts.
+    for _, _fix_row in seed.iterrows():
+        _fix_seg = _fix_row['Segment']
+        _fix_coh = clean_cohort(_fix_row['Cohort'])
+        _fix_first_fcst_mob = _fix_row['MOB']
+        _fix_ext_mask = (
+            (working_curves['Segment'] == _fix_seg) &
+            (working_curves['Cohort'] == _fix_coh) &
+            (working_curves['MOB'] >= _fix_first_fcst_mob)
+        )
+        working_curves.loc[_fix_ext_mask, '__is_forecast'] = True
 
     lookups = []
 
@@ -2955,10 +3320,8 @@ def build_rate_lookup(seed: pd.DataFrame, curves: pd.DataFrame,
                 meth = get_methodology(methodology, segment, cohort, mob, metric)
 
                 # Apply approach using working_curves (includes previous forecasts)
-                result = apply_approach(
-                    working_curves, segment, cohort, mob, metric, meth,
-                    ds_donor_curves=ds_donor_curves,
-                )
+                result = apply_approach(working_curves, segment, cohort, mob, metric, meth,
+                                           ds_donor_curves=ds_donor_curves)
 
                 # Apply cap
                 capped_rate = apply_rate_cap(result['Rate'], metric, result['ApproachTag'])
@@ -2990,6 +3353,68 @@ def build_rate_lookup(seed: pd.DataFrame, curves: pd.DataFrame,
     logger.info(f"Built rate lookup with {len(lookup_df)} entries")
 
     return lookup_df
+
+
+def patch_curves_extended_from_lookup(
+    curves_extended: pd.DataFrame,
+    rate_lookup: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    FIX v7.0k3: Patch curves_extended with correctly-computed forecast rates.
+
+    Background:
+        extend_curves() flat-forwards each cohort's last actual rate for all forecast
+        MOBs, creating a flat tail in curves_extended. build_rate_lookup() correctly
+        computes the forecast rates (ShapeBorrowScaled, DonorCohort, CohortAvg, etc.)
+        but these only live in rate_lookup — they are never written back to
+        curves_extended. As a result, 3_Extended_Curves shows flat Lc values
+        instead of the true methodology-computed rates.
+
+    This function patches the forecast MOB rows in curves_extended with the rates
+    from rate_lookup, using a merge on (Segment, Cohort, MOB). Actual MOB rows
+    not present in rate_lookup are untouched.
+
+    Args:
+        curves_extended: Extended curves with flat-forwarded rates for forecast MOBs
+        rate_lookup: Rate lookup table with correctly-computed forecast rates
+
+    Returns:
+        pd.DataFrame: Updated curves_extended with correct forecast rates
+    """
+    key_cols = ['Segment', 'Cohort', 'MOB']
+
+    # Only patch rate columns that exist in both DataFrames
+    rate_cols = [
+        col for col in rate_lookup.columns
+        if col.endswith('_Rate') and col in curves_extended.columns
+    ]
+
+    if not rate_cols:
+        logger.warning(
+            "patch_curves_extended_from_lookup: No matching _Rate columns found — "
+            "curves_extended unchanged"
+        )
+        return curves_extended
+
+    # Rename lookup rate columns to avoid collision during left-merge
+    patch_rename = {col: f'__patch_{col}' for col in rate_cols}
+    lookup_patch = rate_lookup[key_cols + rate_cols].rename(columns=patch_rename)
+
+    # Left join: every curves_extended row is preserved; forecast rows gain patch columns
+    merged = curves_extended.merge(lookup_patch, on=key_cols, how='left')
+
+    # Apply patches only where the lookup provided a non-NaN value
+    for orig_col, patch_col in patch_rename.items():
+        if patch_col in merged.columns:
+            has_patch = merged[patch_col].notna()
+            merged.loc[has_patch, orig_col] = merged.loc[has_patch, patch_col]
+            merged.drop(columns=[patch_col], inplace=True)
+
+    logger.info(
+        f"patch_curves_extended_from_lookup: patched {len(rate_lookup)} forecast rows "
+        f"across {len(rate_cols)} rate columns in curves_extended"
+    )
+    return merged
 
 
 def build_impairment_lookup(seed: pd.DataFrame, impairment_curves: pd.DataFrame,
@@ -3188,13 +3613,13 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
         coll_interest = opening_gbv * rates.get('Coll_Interest_Rate', 0.0)
         interest_revenue = opening_gbv * rates.get('InterestRevenue_Rate', 0.0) / 12  # Monthly
 
-        # WO_DebtSold only occurs in debt sale months (Mar, Jun, Sep, Dec)
-        # For DSDonorCRScaled: compute raw amount (pre-scale) then apply Layer B factor.
-        # For all other approaches: scale_factor = 1.0 (no change).
+        # WO_DebtSold only occurs in debt sale months (Mar, Jun, Sep, Dec).
+        # Layer A: donor-curve rate applied to opening GBV  → wo_debt_sold_raw (pre-scale)
+        # Layer B: segment-level scale factor applied         → wo_debt_sold (used in GBV)
         if is_debt_sale_month(forecast_month):
             wo_debt_sold_raw = opening_gbv * rates.get('WO_DebtSold_Rate', 0.0)
             ds_scale_factor = float(rates.get('WO_DebtSold_ScaleFactor', 1.0))
-            wo_debt_sold = wo_debt_sold_raw * ds_scale_factor  # scaled value used in GBV
+            wo_debt_sold = wo_debt_sold_raw * ds_scale_factor
         else:
             wo_debt_sold_raw = 0.0
             ds_scale_factor = float(rates.get('WO_DebtSold_ScaleFactor', 1.0))
@@ -3204,7 +3629,7 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
         contra_principal = opening_gbv * rates.get('ContraSettlements_Principal_Rate', 0.0)
         contra_interest = opening_gbv * rates.get('ContraSettlements_Interest_Rate', 0.0)
 
-        # Calculate closing GBV (uses scaled WO_DebtSold so GBV bridge is consistent)
+        # Calculate closing GBV
         closing_gbv = (
             opening_gbv +
             interest_revenue -
@@ -3241,8 +3666,8 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
         # Core coverage is back-solved in post-processing for months BEFORE debt sales
         # =======================================================================
 
-        # Scaled WO_DebtSold is used throughout GBV mechanics (provision release, proceeds)
-        debt_sale_wo_raw = wo_debt_sold  # wo_debt_sold is already scaled; used in provision calc
+        # Raw amounts for GBV mechanics (positive values)
+        debt_sale_wo_raw = wo_debt_sold  # Raw positive amount used in GBV calc
         ds_coverage_ratio = Config.DS_COVERAGE_RATIO  # Fixed 78.5%
         ds_proceeds_rate = Config.DS_PROCEEDS_RATE  # Fixed 24p per £1 of GBV sold
 
@@ -3262,8 +3687,7 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
         ds_proceeds = ds_proceeds_rate * debt_sale_wo_raw
 
         # Store write-offs as POSITIVE (absolute amounts)
-        # wo_debt_sold is the scaled value; wo_debt_sold_raw is the pre-scale value
-        wo_debt_sold_stored = wo_debt_sold   # scaled (used in GBV bridge & impairment)
+        wo_debt_sold_stored = wo_debt_sold
         wo_other_stored = wo_other
 
         # Step 5: Calculate Non-DS provision movement
@@ -3303,7 +3727,6 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
             'InterestRevenue_Approach': rates.get('InterestRevenue_Approach', ''),
             'WO_DebtSold_Rate': rates.get('WO_DebtSold_Rate', 0.0),
             'WO_DebtSold_Approach': rates.get('WO_DebtSold_Approach', ''),
-            'WO_DebtSold_ScaleFactor': round(ds_scale_factor, 6),
             'WO_Other_Rate': rates.get('WO_Other_Rate', 0.0),
             'WO_Other_Approach': rates.get('WO_Other_Approach', ''),
             'NewLoanAmount_Rate': rates.get('NewLoanAmount_Rate', 0.0),
@@ -3318,8 +3741,9 @@ def run_one_step(seed_table: pd.DataFrame, rate_lookup: pd.DataFrame,
             'Coll_Principal': round(coll_principal, 2),
             'Coll_Interest': round(coll_interest, 2),
             'InterestRevenue': round(interest_revenue, 2),
-            'WO_DebtSold_Raw': round(wo_debt_sold_raw, 2),    # pre-scale (donor curve × GBV)
             'WO_DebtSold': round(wo_debt_sold_stored, 2),  # POSITIVE scaled amount (used in GBV bridge)
+            'WO_DebtSold_Raw': round(wo_debt_sold_raw, 2),         # POSITIVE pre-scale (Layer A only)
+            'WO_DebtSold_ScaleFactor': round(ds_scale_factor, 6),  # Layer B multiplier applied
             'WO_Other': round(wo_other_stored, 2),  # POSITIVE (absolute amount)
             'ContraSettlements_Principal': round(contra_principal, 2),
             'ContraSettlements_Interest': round(contra_interest, 2),
@@ -5041,7 +5465,10 @@ def run_backbook_forecast(fact_raw_path: str, methodology_path: str,
         rate_lookup['WO_DebtSold_ScaleFactor'] = (
             rate_lookup['Segment'].map(ds_scale_factors).fillna(1.0)
         )
-
+        # FIX v7.0k3: Patch curves_extended with the correctly-computed forecast rates
+        # so that 3_Extended_Curves reflects the true methodology rates (not flat Lc tail).
+        # extend_curves() only flat-forwards last actual; build_rate_lookup() has the real rates.
+        curves_extended = patch_curves_extended_from_lookup(curves_extended, rate_lookup)
         # Use curves_base for coverage ratio lookups instead of impairment_curves.
         # impairment_curves computes coverage ratios by aggregating across CalendarMonth
         # first (mixing different MOBs together when a cohort has sub-groups), which
