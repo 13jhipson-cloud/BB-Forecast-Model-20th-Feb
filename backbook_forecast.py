@@ -4820,6 +4820,10 @@ def generate_comprehensive_transparency_report(
             curves_base[col] = 0.0
     historical_curves = curves_base[[c for c in curves_cols if c in curves_base.columns]].copy()
     historical_curves['CurveType'] = 'Historical'
+    # Post-scale DS rate = same as actual WO_DebtSold_Rate (actuals already reflect true events).
+    # We alias it here so the curve comparison loop can look up WO_DebtSold_PostScale_Rate
+    # in historical_curves alongside the pre-scale WO_DebtSold_Rate.
+    historical_curves['WO_DebtSold_PostScale_Rate'] = historical_curves['WO_DebtSold_Rate']
 
     # ==========================================================================
     # Prepare Extended Curves
@@ -4890,8 +4894,20 @@ def generate_comprehensive_transparency_report(
     # ==========================================================================
     # Prepare Curve Comparison (actual historical rates vs forecast-applied rates)
     # ==========================================================================
-    flow_metrics = ['Coll_Principal', 'Coll_Interest', 'InterestRevenue']
+    flow_metrics = ['Coll_Principal', 'Coll_Interest', 'InterestRevenue',
+                    'WO_DebtSold',            # pre-scale Layer A donor curve rate
+                    'WO_DebtSold_PostScale']   # post-scale rate (Layer A × Layer B)
     curve_rows = []
+
+    # Derive the post-scale DS rate on the forecast so the loop can pick it up via
+    # the standard {metric}_Rate / {metric}_Approach column naming convention.
+    forecast = forecast.copy()
+    forecast['WO_DebtSold_PostScale_Rate'] = forecast.apply(
+        lambda r: safe_divide(r['WO_DebtSold'], r['OpeningGBV']), axis=1
+    )
+    forecast['WO_DebtSold_PostScale_Approach'] = (
+        forecast['WO_DebtSold_Approach'] if 'WO_DebtSold_Approach' in forecast.columns else ''
+    )
 
     for metric in flow_metrics:
         rate_col = f'{metric}_Rate'
