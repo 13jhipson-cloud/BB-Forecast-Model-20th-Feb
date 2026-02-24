@@ -2699,9 +2699,11 @@ def _get_ds_event_mobs_for_cohort(cohort: str, max_mob: int = 120) -> List[int]:
         orig_month = 1  # fallback to January
 
     ds_event_months = set(Config.DS_MONTHS)
+    # MOB convention: MOB 0 = origination month, MOB n = n months after origination.
+    # Calendar month at MOB n = ((orig_month - 1 + n) % 12) + 1.
     return [
         mob for mob in range(1, max_mob + 1)
-        if (((orig_month - 1) + (mob - 1)) % 12 + 1) in ds_event_months
+        if (((orig_month - 1) + mob) % 12 + 1) in ds_event_months
     ]
 
 
